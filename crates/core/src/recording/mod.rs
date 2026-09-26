@@ -146,6 +146,48 @@ impl Budget {
     }
 }
 
+/// Replace each unpaired UTF-16 surrogate escape in JSON text (`\ud83d` with no low half) with
+/// `\ufffd`, in place.
+///
+/// Browsers record such strings (text cut through an emoji is still a valid JavaScript string),
+/// but JSON parsers reject them, which would fail the whole recording. The replacement is the
+/// same six bytes and one UTF-16 unit, so offsets and JavaScript lengths are unchanged.
+fn replace_lone_surrogates(json: &mut [u8]) {
+    fn escape(json: &[u8], at: usize) -> Option<u16> {
+        let digits = json.get(at..at + 6)?;
+        if digits[0] != b'\\' || digits[1] != b'u' {
+            return None;
+        }
+        u16::from_str_radix(std::str::from_utf8(&digits[2..]).ok()?, 16).ok()
+    }
+    const HIGH: std::ops::RangeInclusive<u16> = 0xd800..=0xdbff;
+    const LOW: std::ops::RangeInclusive<u16> = 0xdc00..=0xdfff;
+    let mut at = 0;
+    while let Some(offset) = json
+        .get(at..)
+        .and_then(|rest| rest.iter().position(|&byte| byte == b'\\'))
+    {
+        at += offset;
+        match escape(json, at) {
+            Some(unit) if HIGH.contains(&unit) => {
+                if escape(json, at + 6).is_some_and(|next| LOW.contains(&next)) {
+                    at += 12;
+                } else {
+                    json[at..at + 6].copy_from_slice(br"\ufffd");
+                    at += 6;
+                }
+            }
+            Some(unit) if LOW.contains(&unit) => {
+                json[at..at + 6].copy_from_slice(br"\ufffd");
+                at += 6;
+            }
+            Some(_) => at += 6,
+            // Any other escape is two bytes, including `\\`, whose second backslash starts nothing.
+            None => at += 2,
+        }
+    }
+}
+
 /// Where an event's data sits in the recording text.
 #[derive(Clone, Copy, Debug)]
 enum Data {
@@ -321,6 +363,10 @@ impl Recording {
         budget: Budget,
         index: impl FnOnce(&mut Indexer<'_>) -> Result<()>,
     ) -> Result<Self> {
+        let mut bytes = text.into_bytes();
+        replace_lone_surrogates(&mut bytes);
+        // Only ASCII escapes changed, so the text is still UTF-8.
+        let text = String::from_utf8(bytes).map_err(|_| DecodeError::NotUtf8("recording"))?;
         let (entries, tabs) = {
             let mut indexer = Indexer::new(&text);
             index(&mut indexer)?;
@@ -403,7 +449,9 @@ impl Recording {
     /// Unpack a posthog-js packed string: compressed bytes, one per UTF-16 unit.
     fn unpack(&self, packed: &str) -> Result<Vec<u8>> {
         let bytes: Vec<u8> = packed.encode_utf16().map(|unit| unit as u8).collect();
-        self.budget.decompress(&bytes)
+        let mut unpacked = self.budget.decompress(&bytes)?;
+        replace_lone_surrogates(&mut unpacked);
+        Ok(unpacked)
     }
 
     /// What an event means. Errors only for corrupt or oversized compressed content; oddly

@@ -405,3 +405,35 @@ fn every_member_of_a_gzip_file_is_decoded() {
     let recording = decode_with(&file, Limits::default()).unwrap();
     assert_eq!(recording.len(), 2);
 }
+
+#[test]
+fn a_lone_surrogate_in_recorded_text_does_not_fail_the_recording() {
+    // A browser can record text cut through an emoji: "\ud83d" alone is a valid JavaScript
+    // string but not valid JSON Unicode. It reads as U+FFFD, one UTF-16 unit like the original.
+    let page = page("Save")
+        .to_string()
+        .replace(r#""Save""#, r#""Save \ud83d""#);
+    let meta = json!({ "type": 4, "timestamp": 0, "win": "tab", "data": { "href": "https://example.test/page" } });
+    let plain = format!("{meta}\n{{\"type\":2,\"timestamp\":0,\"win\":\"tab\",\"data\":{page}}}\n");
+    let recording = decode_with(plain.as_bytes(), Limits::default()).unwrap();
+    let events: Vec<_> = recording.events().collect();
+    let snapshot: Value =
+        serde_json::from_str(&recording.expanded_data(&events[1]).unwrap()).unwrap();
+    assert_eq!(
+        snapshot["node"]["childNodes"][0]["childNodes"][0]["childNodes"][0]["textContent"],
+        "Save \u{fffd}"
+    );
+
+    // The same inside a posthog-js compressed field.
+    let adds = r#"[{"parentId":2,"nextId":null,"node":{"id":5,"type":3,"textContent":"\ud83d"}}]"#;
+    let packed: String = zstd::encode_all(adds.as_bytes(), 0)
+        .unwrap()
+        .into_iter()
+        .map(char::from)
+        .collect();
+    let line = json!(["tab", { "type": 3, "timestamp": 1, "cv": "2024-10", "data": { "source": 0, "adds": packed } }]).to_string();
+    let recording = Recording::from_snapshot_bodies(&[line], Limits::default()).unwrap();
+    let event = recording.events().next().unwrap();
+    let added: Value = serde_json::from_str(&recording.expanded_data(&event).unwrap()).unwrap();
+    assert_eq!(added["adds"][0]["node"]["textContent"], "\u{fffd}");
+}
