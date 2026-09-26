@@ -34,6 +34,9 @@ pub(crate) fn resolve(
     id: NodeId,
 ) -> Option<Resolution> {
     let node = mirror.get(id)?;
+    if node.extension.is_some() {
+        return None;
+    }
     let start = if node.is_element() {
         node
     } else {

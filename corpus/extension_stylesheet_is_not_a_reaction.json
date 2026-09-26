@@ -1,0 +1,172 @@
+{
+ "description": "Injected stylesheets from extension URLs do not count as rendered response.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "div",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Just text"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1200,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 13,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 17,
+       "tagName": "style",
+       "attributes": {
+        "_cssText": "url(chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen/style.css)"
+       },
+       "childNodes": []
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1300,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 13,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 18,
+       "tagName": "link",
+       "attributes": {
+        "rr_src": "moz-extension://browser/style.css",
+        "href": "chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen/main.css"
+       },
+       "childNodes": []
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1400,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 13,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 20,
+       "tagName": "style",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 3,
+         "id": 19,
+         "textContent": "url(safari-extension://browser/extra.css)"
+        }
+       ]
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	0.1	w2	nav	/wrong-tab	/wrong-tab				
+e3	1.1	w1	click	demo.page	button "Save"			none	unresponsive

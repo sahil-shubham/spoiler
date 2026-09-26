@@ -78,7 +78,7 @@ pub(super) fn scan_subtree(mirror: &Mirror, root: NodeId) -> Scan {
     for _ in 0..MAX_OVERLAY_SCAN {
         let Some(id) = stack.pop() else { break };
         let Some(node) = mirror.get(id) else { continue };
-        if !node.is_element() || is_non_visual(&node.tag) {
+        if !node.is_element() || node.extension.is_some() || is_non_visual(&node.tag) {
             continue;
         }
         if let Some(role) = node.attr("role").filter(|role| is_overlay_role(role)) {
@@ -121,9 +121,9 @@ pub(super) fn text_bag(mirror: &Mirror, root: NodeId) -> Vec<String> {
 
 /// Under `<head>`, `<style>`, `<script>`…: never on screen (a `<title>` change included).
 pub(super) fn is_offscreen(mirror: &Mirror, id: NodeId) -> bool {
-    mirror
-        .lineage(id)
-        .any(|node| is_non_visual(&node.tag) || is_screen_reader_only(node))
+    mirror.lineage(id).any(|node| {
+        node.extension.is_some() || is_non_visual(&node.tag) || is_screen_reader_only(node)
+    })
 }
 
 /// The text content of a subtree, for netting against other subtrees at the same place.

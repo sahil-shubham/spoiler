@@ -4,6 +4,122 @@ use crate::{
     text::{collapse_whitespace, truncate, utf16_len},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use std::sync::Arc;
+
+const EXTENSION_SCHEMES: [&str; 4] = [
+    "chrome-extension://",
+    "moz-extension://",
+    "safari-web-extension://",
+    "safari-extension://",
+];
+const DENYLIST_IDS: [&str; 3] = [
+    "mloajfnmjckfjbeeofcdaecbelnblden",
+    "becfinhbfclcgokjlobojlnldbfillpf",
+    "fnliebffpgomomjeflboommgbdnjadbh",
+];
+
+/// Name a public Chrome extension by its store id; other schemes cannot be attributed safely.
+pub(crate) fn extension_url(text: &str) -> Option<&str> {
+    for scheme in EXTENSION_SCHEMES {
+        if let Some(at) = text.find(scheme) {
+            let host = text[at + scheme.len()..]
+                .split(|c: char| !c.is_ascii_lowercase())
+                .next()
+                .unwrap_or_default();
+            return Some(
+                if scheme == "chrome-extension://"
+                    && host.len() == 32
+                    && host.bytes().all(|b| (b'a'..=b'p').contains(&b))
+                {
+                    host
+                } else {
+                    scheme.trim_end_matches("://")
+                },
+            );
+        }
+    }
+    None
+}
+
+pub(crate) fn extension_request_url(text: &str) -> Option<&str> {
+    EXTENSION_SCHEMES
+        .iter()
+        .any(|scheme| text.trim_start().starts_with(scheme))
+        .then(|| extension_url(text))
+        .flatten()
+}
+
+fn extension_tag(tag: &str) -> Option<&'static str> {
+    [
+        "grammarly-",
+        "readwise-",
+        "superhuman-",
+        "com-1password-",
+        "protonpass-root",
+        "browserflow-",
+        "loom-",
+        "tracxn-extension",
+        "dex-notifications",
+        "dji-sru",
+        "sublime-root",
+        "aitopia",
+    ]
+    .into_iter()
+    .find(|family| tag.starts_with(family))
+}
+
+fn extension_source<'a>(
+    tag: &str,
+    text: &'a str,
+    attributes: &'a [(String, AttrValue)],
+) -> Option<&'a str> {
+    if let Some(family) = extension_tag(tag) {
+        return Some(family);
+    }
+    for (name, value) in attributes {
+        let Some(value) = value.as_str() else {
+            continue;
+        };
+        if matches!(name.as_str(), "id" | "class") {
+            if let Some(id) = DENYLIST_IDS.into_iter().find(|id| value.contains(id)) {
+                return Some(id);
+            }
+            if let Some(family) = ["dji-sru", "sublime-root", "aitopia"]
+                .into_iter()
+                .find(|family| value.contains(family))
+            {
+                return Some(family);
+            }
+        }
+        if matches!(name.as_str(), "src" | "href" | "rr_src")
+            && let Some(extension) = extension_request_url(value)
+        {
+            return Some(extension);
+        }
+        if matches!(tag, "style" | "link")
+            && matches!(name.as_str(), "textContent" | "_cssText")
+            && let Some(extension) = extension_url(value)
+        {
+            return Some(extension);
+        }
+    }
+    matches!(tag, "style" | "link")
+        .then(|| extension_url(text))
+        .flatten()
+}
+
+/// Own extension marker on a serialized element (not inherited); a style's text may be a child.
+pub(crate) fn serialized_extension(node: &SerializedNode) -> Option<&str> {
+    extension_source(&node.tag, &node.text, &node.attributes.0).or_else(|| {
+        matches!(node.tag.as_str(), "style" | "link")
+            .then(|| {
+                node.children
+                    .iter()
+                    .find_map(|child| extension_url(&child.text))
+            })
+            .flatten()
+    })
+}
 
 /// Bound on parent-chain walks: a malformed recording must not loop forever.
 const MAX_DEPTH: usize = 10_000;
@@ -29,6 +145,8 @@ pub struct Node {
     pub attributes: Vec<(String, AttrValue)>,
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
+    /// Browser-extension subtree, including inherited markers; nodes remain addressable.
+    pub extension: Option<Arc<str>>,
 }
 
 impl Node {
@@ -98,6 +216,10 @@ impl Mirror {
         self.nodes.contains_key(&id)
     }
 
+    pub fn extension(&self, id: NodeId) -> Option<&str> {
+        self.get(id)?.extension.as_deref()
+    }
+
     pub fn parent(&self, id: NodeId) -> Option<&Node> {
         self.get(self.get(id)?.parent?)
     }
@@ -157,9 +279,17 @@ impl Mirror {
             }
         }
         self.apply_adds(adds);
+        let mut refresh = Vec::new();
         for change in texts {
             if let Some(node) = self.nodes.get_mut(&change.id) {
                 node.text = change.value;
+            }
+            if self.get(change.id).is_some_and(|node| node.tag == "style")
+                || self
+                    .parent(change.id)
+                    .is_some_and(|parent| parent.tag == "style")
+            {
+                refresh.push(change.id);
             }
         }
         for change in attributes {
@@ -167,9 +297,24 @@ impl Mirror {
                 continue;
             };
             let Attributes(pairs) = change.attributes;
+            if pairs.iter().any(|(name, _)| {
+                matches!(
+                    name.as_str(),
+                    "src" | "href" | "rr_src" | "id" | "class" | "textContent" | "_cssText"
+                )
+            }) {
+                refresh.push(change.id);
+            }
             for (name, value) in &pairs {
                 node.write_attribute(name, value);
             }
+        }
+        for id in refresh {
+            let root = self
+                .parent(id)
+                .filter(|parent| parent.tag == "style")
+                .map_or(id, |parent| parent.id);
+            self.refresh_extensions(root);
         }
     }
 
@@ -216,6 +361,7 @@ impl Mirror {
         }
         if let Some(existing) = self.nodes.get_mut(&id) {
             existing.parent = parent;
+            self.refresh_extensions(id);
         } else {
             self.register(add.node, parent);
         }
@@ -224,8 +370,12 @@ impl Mirror {
     /// Move a serialized subtree into the mirror. Children are visited last-first (a stack), and
     /// a later registration of a duplicate id replaces the earlier one.
     fn register(&mut self, root: SerializedNode, parent: Option<NodeId>) {
-        let mut stack = vec![(root, parent)];
-        while let Some((mut serialized, parent)) = stack.pop() {
+        let inherited = parent.and_then(|id| self.nodes.get(&id)?.extension.clone());
+        let mut stack = vec![(root, parent, inherited)];
+        while let Some((mut serialized, parent, inherited)) = stack.pop() {
+            let extension = serialized_extension(&serialized)
+                .map(Arc::<str>::from)
+                .or(inherited);
             let children = std::mem::take(&mut serialized.children);
             let id = serialized.id;
             let node = Node {
@@ -241,9 +391,50 @@ impl Mirror {
                 attributes: std::mem::take(&mut serialized.attributes.0),
                 children: children.iter().map(|child| child.id).collect(),
                 parent,
+                extension: extension.clone(),
             };
             self.nodes.insert(id, node);
-            stack.extend(children.into_iter().map(|child| (child, Some(id))));
+            stack.extend(
+                children
+                    .into_iter()
+                    .map(|child| (child, Some(id), extension.clone())),
+            );
+        }
+    }
+
+    fn refresh_extensions(&mut self, root: NodeId) {
+        let inherited = self
+            .parent(root)
+            .and_then(|parent| parent.extension.clone());
+        let mut stack = vec![(root, inherited)];
+        while let Some((id, inherited)) = stack.pop() {
+            let Some(node) = self.nodes.get(&id) else {
+                continue;
+            };
+            let own = extension_source(&node.tag, &node.text, &node.attributes).or_else(|| {
+                matches!(node.tag.as_str(), "style" | "link")
+                    .then(|| {
+                        node.children
+                            .iter()
+                            .filter_map(|child| self.nodes.get(child))
+                            .find_map(|child| extension_url(&child.text))
+                    })
+                    .flatten()
+            });
+            let extension = match own {
+                Some(name) if node.extension.as_deref() == Some(name) => node.extension.clone(),
+                Some(name) => Some(Arc::<str>::from(name)),
+                None => inherited,
+            };
+            stack.extend(
+                node.children
+                    .iter()
+                    .map(|child| (*child, extension.clone())),
+            );
+            self.nodes
+                .get_mut(&id)
+                .expect("node still exists")
+                .extension = extension;
         }
     }
 
@@ -323,6 +514,9 @@ impl<'m, F: Fn(&str) -> bool> Iterator for TextNodes<'m, F> {
             let Some(node) = self.mirror.get(id) else {
                 continue;
             };
+            if node.extension.is_some() {
+                continue;
+            }
             if node.is_element() && (self.skip)(&node.tag) {
                 continue;
             }

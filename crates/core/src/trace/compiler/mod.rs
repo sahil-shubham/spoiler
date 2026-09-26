@@ -13,6 +13,7 @@ mod handlers;
 mod tab;
 
 use super::{Action, Coverage, signals::finalize};
+use crate::replay::serialized_extension;
 use crate::time::{Millis, Timestamp};
 use crate::{
     recording::{
@@ -69,7 +70,24 @@ pub fn compile(
         actions: Vec::new(),
         folds: Vec::new(),
         coverage,
+        hrefs: IndexMap::new(),
     };
+    // Only posthog-js's own location events can repair a missing Meta. Keep tab boundaries.
+    for event in recording.events().filter(|event| event.kind == 5) {
+        if let Reading::Signal(Signal::Custom { tag, payload }) = recording.read(&event)?
+            && matches!(tag.as_str(), "$pageview" | "$url_changed")
+            && let Some(href) = payload["href"]
+                .as_str()
+                .map(str::trim)
+                .filter(|href| !href.is_empty())
+        {
+            compiler
+                .hrefs
+                .entry(event.win.to_owned())
+                .or_default()
+                .push((event.timestamp, href.to_owned()));
+        }
+    }
     // Events PostHog stored twice: identical to another at the same timestamp in the same tab.
     let mut same_time: Vec<EventRef<'_>> = Vec::new();
     for event in recording.events() {
@@ -120,10 +138,23 @@ impl Coverage {
         Self::count(&mut self.uninterpreted, name);
     }
 
-    /// Survey mounted content the trace cannot see into.
-    fn survey(&mut self, root: &SerializedNode) {
-        let mut stack = vec![root];
-        while let Some(node) = stack.pop() {
+    pub(super) fn extension(&mut self, name: &str) {
+        Self::count(&mut self.extensions, name);
+    }
+
+    /// Survey mounted content the trace cannot see into, skipping extension-owned subtrees.
+    fn survey(&mut self, root: &SerializedNode, under_extension: bool) {
+        let mut stack = vec![(root, under_extension)];
+        while let Some((node, inherited)) = stack.pop() {
+            if let Some(extension) = serialized_extension(node) {
+                if !inherited {
+                    self.extension(extension);
+                }
+                continue;
+            }
+            if inherited {
+                continue;
+            }
             let opaque = match node.tag.as_str() {
                 "iframe" | "frame" => Some("iframe"),
                 "canvas" => Some("canvas"),
@@ -139,7 +170,7 @@ impl Coverage {
                     .entry("shadow_root".to_owned())
                     .or_default() += 1;
             }
-            stack.extend(&node.children);
+            stack.extend(node.children.iter().map(|child| (child, false)));
         }
     }
 }
@@ -162,6 +193,8 @@ impl Context<'_> {
 struct Compiler<'a> {
     context: Context<'a>,
     tabs: IndexMap<String, Tab>,
+    /// posthog-js pageviews/URL changes by window for FullSnapshots missing a Meta.
+    hrefs: IndexMap<String, Vec<(Timestamp, String)>>,
     actions: Vec<Action>,
     /// (earlier click, double-click) pairs to merge when finalizing.
     folds: Vec<(usize, usize)>,
@@ -175,6 +208,7 @@ impl Compiler<'_> {
             tabs,
             actions,
             folds,
+            hrefs,
             coverage,
         } = self;
         // Tab numbers follow each tab's first event, whatever the event is.
@@ -197,11 +231,25 @@ impl Compiler<'_> {
             Reading::Malformed(name) => return Coverage::count(&mut coverage.malformed, &name),
         };
         match signal {
-            Signal::FullSnapshot(root) => on_full_snapshot(tab, coverage, root, at),
+            Signal::FullSnapshot(root) => {
+                if tab.location.is_none() {
+                    let known = hrefs.get(event.win).and_then(|urls| {
+                        urls.iter()
+                            .find(|(time, _)| *time >= at)
+                            .or_else(|| urls.iter().rev().find(|(time, _)| *time < at))
+                    });
+                    if let Some((_, href)) = known {
+                        tab.navigate(context, href, at, actions);
+                    } else {
+                        coverage.unlocated_snapshots += 1;
+                    }
+                }
+                on_full_snapshot(tab, coverage, root, at);
+            }
             Signal::Meta { href } => tab.navigate(context, &href, at, actions),
             Signal::Mutation(mutation) => on_mutation(tab, coverage, mutation, at),
-            Signal::Mouse(mouse) => on_mouse(context, tab, actions, folds, mouse, at),
-            Signal::Input(input) => on_input(context, tab, actions, input, at),
+            Signal::Mouse(mouse) => on_mouse(context, tab, coverage, actions, folds, mouse, at),
+            Signal::Input(input) => on_input(context, tab, coverage, actions, input, at),
             Signal::Selection(ranges) => on_selection(context, tab, actions, &ranges, at),
             Signal::Custom { tag, payload } => {
                 if !on_custom(context, tab, actions, &tag, &payload, at) {
@@ -209,7 +257,7 @@ impl Compiler<'_> {
                 }
             }
             Signal::Plugin { name, payload } => {
-                if !on_plugin(context, tab, actions, &name, &payload, at) {
+                if !on_plugin(context, tab, coverage, actions, &name, &payload, at) {
                     coverage.uninterpreted(&format!("plugin:{name}"));
                 }
             }

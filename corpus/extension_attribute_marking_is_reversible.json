@@ -1,0 +1,161 @@
+{
+ "description": "A later URL attribute can mark an existing subtree, and removing it restores product clicks.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 17,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 16,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 15,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 13,
+           "tagName": "a",
+           "attributes": {
+            "href": "/page"
+           },
+           "childNodes": [
+            {
+             "type": 2,
+             "id": 12,
+             "tagName": "span",
+             "attributes": {},
+             "childNodes": [
+              {
+               "type": 3,
+               "id": 11,
+               "textContent": "Open"
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 0,
+    "adds": [],
+    "removes": [],
+    "texts": [],
+    "attributes": [
+     {
+      "id": 13,
+      "attributes": {
+       "href": "chrome-extension://liecbddmkiiihnedobmlmillhodjkdmb/popup"
+      }
+     }
+    ]
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 2000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 2050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 4000,
+   "data": {
+    "source": 0,
+    "adds": [],
+    "removes": [],
+    "texts": [],
+    "attributes": [
+     {
+      "id": 13,
+      "attributes": {
+       "href": "/page"
+      }
+     }
+    ]
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 5000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 5050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  }
+ ]
+}

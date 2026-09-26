@@ -1,0 +1,4 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	/checkout	/checkout				
+e2	1.1	w1	click	/checkout	button "First"			none	unresponsive
+e3	5.0	w1	click	/checkout	button "Continue"			none	unresponsive

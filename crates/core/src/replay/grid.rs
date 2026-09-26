@@ -73,6 +73,7 @@ impl RowSnapshot {
 /// A grid cell. A row's own header (`<th scope=row>`, `role=rowheader`) counts as a cell.
 pub fn is_cell(node: &Node) -> bool {
     node.is_element()
+        && node.extension.is_none()
         && (node.tag == "td"
             || matches!(node.attr("role"), Some("gridcell" | "rowheader"))
             || (node.tag == "th" && node.attr("scope") == Some("row")))
@@ -80,6 +81,7 @@ pub fn is_cell(node: &Node) -> bool {
 
 fn is_data_row(mirror: &Mirror, node: &Node) -> bool {
     node.is_element()
+        && node.extension.is_none()
         && (node.tag == "tr" || node.attr("role") == Some("row"))
         && node
             .children
@@ -93,6 +95,9 @@ fn is_boundary(node: &Node) -> bool {
 
 fn nearest(mirror: &Mirror, id: NodeId, matches: impl Fn(&Node) -> bool) -> Option<NodeId> {
     for node in mirror.lineage(id).take(MAX_GRID_DEPTH) {
+        if node.extension.is_some() {
+            return None;
+        }
         if matches(node) {
             return Some(node.id);
         }
@@ -120,7 +125,7 @@ pub fn rows_in(mirror: &Mirror, id: NodeId) -> Vec<NodeId> {
     for _ in 0..MAX_ROW_SCAN {
         let Some(id) = stack.pop() else { break };
         let Some(node) = mirror.get(id) else { continue };
-        if !node.is_element() || is_cell(node) {
+        if !node.is_element() || node.extension.is_some() || is_cell(node) {
             continue;
         }
         if is_data_row(mirror, node) {
@@ -143,7 +148,7 @@ fn headers(mirror: &Mirror, table: NodeId) -> Vec<String> {
     let mut stack = vec![table];
     while let Some(id) = stack.pop() {
         let Some(node) = mirror.get(id) else { continue };
-        if !node.is_element() || node.tag == "tbody" {
+        if !node.is_element() || node.extension.is_some() || node.tag == "tbody" {
             continue;
         }
         if node.tag == "th" || node.attr("role") == Some("columnheader") {

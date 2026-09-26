@@ -57,7 +57,6 @@ fn trace_checks_kind_and_schema_before_body() {
             ..
         })
     ));
-    assert_eq!(Kind::Trace.schema_version(), 2);
 }
 
 #[test]

@@ -3,8 +3,10 @@
 pub mod grid;
 mod mirror;
 
-pub(crate) use mirror::serialized_ids;
 pub use mirror::{Mirror, Node, NodeKind, SCRIPT_PLACEHOLDER, TextNodes};
+pub(crate) use mirror::{
+    extension_request_url, extension_url, serialized_extension, serialized_ids,
+};
 
 /// Elements whose content is never on screen.
 pub fn is_non_visual(tag: &str) -> bool {

@@ -1,0 +1,22 @@
+{
+  "coverage": {
+    "events": 5,
+    "duplicates": 0,
+    "uninterpreted": {},
+    "malformed": {},
+    "opaque_mounts": {},
+    "extensions": {
+      "grammarly-": 3
+    }
+  },
+  "visits": [
+    {
+      "first_ref": "e1",
+      "last_ref": "e1",
+      "start_ms": 0.0,
+      "end_ms": 0.0,
+      "start": 0,
+      "end": 1
+    }
+  ]
+}

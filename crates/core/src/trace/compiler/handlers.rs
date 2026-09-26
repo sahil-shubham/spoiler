@@ -4,6 +4,7 @@ use super::{
     Context,
     tab::{Attribution, Tab, Typing},
 };
+use crate::replay::{extension_request_url, extension_url};
 use crate::time::{Millis, Timestamp};
 use crate::trace::{
     Action, Coverage, Detail, Entry, Point, Press, TargetClass,
@@ -48,7 +49,7 @@ pub(super) fn on_full_snapshot(
         gesture.window.flush(&tab.mirror);
     }
     tab.mark_mounted(&root, at);
-    coverage.survey(&root);
+    coverage.survey(&root, false);
     tab.mirror.reset(root);
 }
 
@@ -60,7 +61,34 @@ pub(super) fn on_mutation(
 ) {
     for add in &mutation.adds {
         tab.mark_mounted(&add.node, at);
-        coverage.survey(&add.node);
+        coverage.survey(&add.node, tab.mirror.extension(add.parent).is_some());
+    }
+    // Attributes and style text can turn an already-mounted node into extension content.
+    let mut newly_marked = Vec::new();
+    let mut consider = |id| {
+        if tab.mirror.extension(id).is_none() && !newly_marked.contains(&id) {
+            newly_marked.push(id);
+        }
+    };
+    for change in &mutation.attributes {
+        if change.attributes.0.iter().any(|(name, _)| {
+            matches!(
+                name.as_str(),
+                "src" | "href" | "rr_src" | "id" | "class" | "textContent" | "_cssText"
+            )
+        }) {
+            consider(change.id);
+        }
+    }
+    for change in &mutation.texts {
+        if let Some(style) = tab
+            .mirror
+            .lineage(change.id)
+            .take(2)
+            .find(|node| node.tag == "style")
+        {
+            consider(style.id);
+        }
     }
     let added = mutation.added();
     let collecting = (!tab.hidden)
@@ -72,6 +100,11 @@ pub(super) fn on_mutation(
         gesture.window.after_batch(&tab.mirror, &added, at);
     } else {
         tab.mirror.apply(mutation);
+    }
+    for id in newly_marked {
+        if let Some(extension) = tab.mirror.extension(id) {
+            coverage.extension(extension);
+        }
     }
 }
 
@@ -103,11 +136,21 @@ fn mark_double_click(
 pub(super) fn on_mouse(
     context: &Context<'_>,
     tab: &mut Tab,
+    coverage: &mut Coverage,
     actions: &mut Vec<Action>,
     folds: &mut Vec<(usize, usize)>,
     mouse: Mouse,
     at: Timestamp,
 ) {
+    if let Some(extension) = tab.mirror.extension(mouse.id) {
+        if matches!(
+            mouse.interaction,
+            Interaction::Click | Interaction::ContextMenu
+        ) {
+            coverage.extension(extension);
+        }
+        return;
+    }
     match mouse.interaction {
         Interaction::MouseDown | Interaction::TouchStart => {
             tab.pending_double = None;
@@ -217,6 +260,7 @@ fn describe_input(input: &Input, checkable: bool) -> String {
 pub(super) fn on_input(
     context: &Context<'_>,
     tab: &mut Tab,
+    coverage: &mut Coverage,
     actions: &mut Vec<Action>,
     input: Input,
     at: Timestamp,
@@ -227,6 +271,10 @@ pub(super) fn on_input(
         .copied()
         .unwrap_or(Timestamp::NEG_INFINITY);
     if input.id < 0 || at - mounted_at <= context.thresholds.programmatic_input_ms {
+        return;
+    }
+    if let Some(extension) = tab.mirror.extension(input.id) {
+        coverage.extension(extension);
         return;
     }
     let node = tab.mirror.get(input.id);
@@ -339,6 +387,11 @@ pub(super) fn on_selection(
     }
     tab.selection = Some(key);
     for range in ranges.iter().filter(|range| !range.is_caret()) {
+        if tab.mirror.extension(range.start as NodeId).is_some()
+            || tab.mirror.extension(range.end as NodeId).is_some()
+        {
+            continue;
+        }
         let node_id = range.start as NodeId;
         let node_text = match tab.mirror.get(node_id) {
             Some(node) if !node.text.is_empty() => node.text.clone(),
@@ -405,6 +458,7 @@ pub(super) fn on_custom(
 pub(super) fn on_plugin(
     context: &Context<'_>,
     tab: &mut Tab,
+    coverage: &mut Coverage,
     actions: &mut Vec<Action>,
     name: &str,
     payload: &Value,
@@ -412,6 +466,14 @@ pub(super) fn on_plugin(
 ) -> bool {
     match name {
         "rrweb/console@1" => {
+            if payload["level"] == "error"
+                && let Some(extension) = ["payload", "trace", "stack"]
+                    .into_iter()
+                    .find_map(|field| extension_in_value(&payload[field]))
+            {
+                coverage.extension(extension);
+                return true;
+            }
             if let Some(message) = console_error(payload) {
                 let effect = Effect::unseen(
                     context.relative(at),
@@ -426,7 +488,12 @@ pub(super) fn on_plugin(
             }
         }
         "rrweb/network@1" => {
-            for request in product_requests(payload, at, &context.matcher.vocabulary().telemetry) {
+            for request in product_requests(
+                payload,
+                at,
+                &context.matcher.vocabulary().telemetry,
+                coverage,
+            ) {
                 let effect = Effect::unseen(
                     context.relative(request.at),
                     Change::Request {
@@ -449,6 +516,15 @@ pub(super) fn on_plugin(
         _ => return false,
     }
     true
+}
+
+fn extension_in_value(value: &Value) -> Option<&str> {
+    match value {
+        Value::String(text) => extension_url(text),
+        Value::Array(parts) => parts.iter().find_map(extension_in_value),
+        Value::Object(fields) => fields.values().find_map(extension_in_value),
+        _ => None,
+    }
 }
 
 /// An error-level console message, whitespace runs collapsed, cut to 160 UTF-16 units.
@@ -474,7 +550,12 @@ struct Request {
 }
 
 /// The product's own fetch/XHR requests in a network plugin payload.
-fn product_requests(payload: &Value, fallback_at: Timestamp, telemetry: &[String]) -> Vec<Request> {
+fn product_requests(
+    payload: &Value,
+    fallback_at: Timestamp,
+    telemetry: &[String],
+    coverage: &mut Coverage,
+) -> Vec<Request> {
     let Some(requests) = payload["requests"].as_array() else {
         return Vec::new();
     };
@@ -482,6 +563,10 @@ fn product_requests(payload: &Value, fallback_at: Timestamp, telemetry: &[String
         .iter()
         .filter_map(|request| {
             let name = request["name"].as_str()?;
+            if let Some(extension) = extension_request_url(name) {
+                coverage.extension(extension);
+                return None;
+            }
             let is_product = matches!(
                 request["initiatorType"].as_str(),
                 Some("fetch" | "xmlhttprequest")

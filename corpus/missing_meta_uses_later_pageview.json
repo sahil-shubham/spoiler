@@ -1,0 +1,101 @@
+{
+ "description": "A full snapshot without Meta borrows a later pageview URL in its own tab.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 100,
+   "data": {
+    "tag": "$pageview",
+    "payload": {
+     "href": "https://demo.test/wrong-tab"
+    }
+   },
+   "win": "w2"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 1500,
+   "data": {
+    "tag": "$pageview",
+    "payload": {
+     "href": "https://demo.test/page"
+    }
+   },
+   "win": "w1"
+  }
+ ]
+}

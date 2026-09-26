@@ -1,0 +1,156 @@
+{
+ "description": "Extension network errors and full-snapshot denylist subtrees are not product errors or labels.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 18,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 17,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 16,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 15,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "div",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Just text"
+            }
+           ]
+          },
+          {
+           "type": 2,
+           "id": 14,
+           "tagName": "div",
+           "attributes": {
+            "id": "sublime-root",
+            "class": "fnliebffpgomomjeflboommgbdnjadbh"
+           },
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 13,
+             "textContent": "Extension notice"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 6,
+   "timestamp": 1200,
+   "data": {
+    "plugin": "rrweb/network@1",
+    "payload": {
+     "requests": [
+      {
+       "name": "safari-web-extension://private/resource",
+       "initiatorType": "fetch",
+       "responseStatus": 500
+      },
+      {
+       "name": "safari-extension://browser/helper",
+       "initiatorType": "fetch",
+       "responseStatus": 503
+      },
+      {
+       "name": "https://demo.test/api/fail",
+       "initiatorType": "fetch",
+       "responseStatus": 500
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 4000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 13,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 4050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 13,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  }
+ ]
+}

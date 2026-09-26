@@ -505,6 +505,122 @@ def hidden_error_is_not_shown(r):
     r.custom(1100, "window hidden")
     r.set_text(1200, status["childNodes"][0], "Save failed")
 
+@case("A console error whose trace comes from an extension is not a product error or a gesture failure.")
+def extension_console_error(r):
+    save = button(r, "Save")
+    r.page(0, r.el("body", {}, save))
+    r.press(1000, save)
+    r.push(1200, 6, {"plugin": "rrweb/console@1",
+                     "payload": {"level": "error", "payload": ["Failed to save"],
+                                 "trace": ["chrome-extension://hoklmmgfnpapgjgcpechhaamimifchmp/frame_ant.js"]}})
+    r.console_error(1300, "Error in moz-extension://browser-id/injected.js")
+
+
+@case("A custom extension subtree remains addressable but its text mutation is no visible reaction.")
+def extension_text_change_is_not_a_reaction(r):
+    note = r.el("div", {}, r.text("Just text"))
+    body = r.el("body", {}, note)
+    r.page(0, body)
+    r.press(1000, note)
+    injected = r.el("grammarly-extension", {}, r.text("Waiting"))
+    r.add(1100, body, injected)
+    r.set_text(1200, injected["childNodes"][0], "Save failed")
+
+
+@case("Clicks and inputs inside an extension-owned subtree are not product gestures.")
+def click_on_extension_ui_is_dropped(r):
+    field = r.el("input", {"type": "text"})
+    injected = r.el("grammarly-popups", {}, button(r, "Save"), field)
+    r.page(0, r.el("body", {}, injected))
+    r.press(1000, injected["childNodes"][0]["childNodes"][0])
+    r.input(2000, field, text="extension typing")
+
+
+@case("Injected stylesheets from extension URLs do not count as rendered response.")
+def extension_stylesheet_is_not_a_reaction(r):
+    note = r.el("div", {}, r.text("Just text"))
+    body = r.el("body", {}, note)
+    r.page(0, body)
+    r.press(1000, note)
+    r.add(1200, body, r.el("style", {"_cssText": "url(chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen/style.css)"}))
+    r.add(1300, body, r.el("link", {"rr_src": "moz-extension://browser/style.css",
+                                   "href": "chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen/main.css"}))
+    r.add(1400, body, r.el("style", {}, r.text("url(safari-extension://browser/extra.css)")))
+
+
+@case("A full snapshot without Meta borrows a later pageview URL in its own tab.")
+def missing_meta_uses_later_pageview(r):
+    save = button(r, "Save")
+    r.page(0, r.el("body", {}, save))
+    del r.events[-2]  # full snapshot, no Meta
+    r.custom(100, "$pageview", {"href": HOST + "/wrong-tab"}, win="w2")
+    r.press(1000, save)
+    r.custom(1500, "$pageview", {"href": HOST + "/page"})
+
+
+@case("An unlocatable full snapshot stays unknown rather than inventing a path.")
+def missing_meta_without_pageview(r):
+    save = button(r, "Save")
+    r.page(0, r.el("body", {}, save))
+    del r.events[-2]
+    r.press(1000, save)
+
+
+@case("A second full snapshot without a new Meta on a known tab keeps its current location.")
+def full_snapshot_without_new_meta_keeps_location(r):
+    first = button(r, "First")
+    r.page(0, r.el("body", {}, first), path="/checkout")
+    r.press(1000, first)
+    second = button(r, "Continue")
+    r.page(4000, r.el("body", {}, second), path="/other")
+    del r.events[-2]
+    r.press(5000, second)
+
+
+@case("An extension in a grid cell is not the cell's content or its reaction to a click.")
+def extension_inside_grid_does_not_change_cell(r):
+    table, _, rows, _ = grid(r, [("r1", ["Alpha", "Queued", ""])])
+    injected = r.el("readwise-tooltip-container", {}, r.text("Waiting"))
+    rows[0]["childNodes"][1]["childNodes"].append(injected)
+    note = r.el("div", {}, r.text("Just text"))
+    r.page(0, r.el("body", {}, note, table))
+    r.press(1000, note)
+    r.set_text(1200, injected["childNodes"][0], "Save failed")
+
+
+@case("Extension network errors and full-snapshot denylist subtrees are not product errors or labels.")
+def extension_network_and_denylist(r):
+    note = r.el("div", {}, r.text("Just text"))
+    denied = r.el("div", {"id": "sublime-root", "class": "fnliebffpgomomjeflboommgbdnjadbh"}, r.text("Extension notice"))
+    r.page(0, r.el("body", {}, note, denied))
+    r.press(1000, note)
+    r.push(1200, 6, {"plugin": "rrweb/network@1", "payload": {"requests": [
+        {"name": "safari-web-extension://private/resource", "initiatorType": "fetch", "responseStatus": 500},
+        {"name": "safari-extension://browser/helper", "initiatorType": "fetch", "responseStatus": 503},
+        {"name": "https://demo.test/api/fail", "initiatorType": "fetch", "responseStatus": 500},
+    ]}})
+    r.press(4000, denied["childNodes"][0])
+
+
+@case("A later URL attribute can mark an existing subtree, and removing it restores product clicks.")
+def extension_attribute_marking_is_reversible(r):
+    inner = r.el("span", {}, r.text("Open"))
+    link = r.el("a", {"href": "/page"}, inner)
+    r.page(0, r.el("body", {}, link))
+    r.set_attr(1000, link, "href", "chrome-extension://liecbddmkiiihnedobmlmillhodjkdmb/popup")
+    r.press(2000, inner)
+    r.set_attr(4000, link, "href", "/page")
+    r.press(5000, inner)
+
+
+@case("Extension text nested in a real product button cannot pollute its target label.")
+def extension_child_is_not_a_product_label(r):
+    save = r.el("button", {}, r.text("Save"),
+                r.el("grammarly-extension", {}, r.text("Extension warning")))
+    r.page(0, r.el("body", {}, save))
+    r.press(1000, save)
+
+
 def main():
     CORPUS.mkdir(exist_ok=True)
     for name, (description, build) in CASES.items():

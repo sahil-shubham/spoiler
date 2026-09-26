@@ -38,10 +38,20 @@ pub struct Coverage {
     /// Elements whose inside the trace cannot see (iframe documents, canvas pixels, embeds,
     /// shadow roots), counted each time one is mounted.
     pub opaque_mounts: BTreeMap<String, usize>,
+    /// Suppressed extension roots, gestures, console errors and requests by public id or family.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extensions: BTreeMap<String, usize>,
+    /// Full snapshots on tabs without any location or pageview URL to borrow.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub unlocated_snapshots: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 /// Version of the compilation rules. Traces from other versions are not comparable.
-pub const COMPILER_VERSION: u32 = 5;
+pub const COMPILER_VERSION: u32 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

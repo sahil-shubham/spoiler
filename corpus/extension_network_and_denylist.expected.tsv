@@ -1,0 +1,4 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	1.1	w1	click	demo.page	div "Just text"			net 500 /api/fail	error_after,dead
+e3	1.2	w1	net_error	demo.page	500 /api/fail				
