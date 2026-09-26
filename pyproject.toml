@@ -1,0 +1,37 @@
+# Packages the `spoiler` binary as Python wheels (the way ruff and uv ship theirs), so
+# `pip install spoiler` / `uv add spoiler` puts it on PATH. There is no Python API.
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "spoiler"
+description = "Session recording traces, friction signals, and validated LLM narration for PostHog/rrweb"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+authors = [{ name = "Sahil Shubham" }]
+keywords = ["session-replay", "rrweb", "posthog", "ux", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# The version is the Cargo workspace's.
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://spoiler.sh"
+Repository = "https://github.com/sahil-shubham/spoiler"
+Changelog = "https://github.com/sahil-shubham/spoiler/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "crates/cli/Cargo.toml"
+strip = true
+locked = true

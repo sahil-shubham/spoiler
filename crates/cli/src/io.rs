@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use spoiler_core::{
     artifact::sha256_hex,
     recording::{DecodeError, Limits},
@@ -13,16 +14,43 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub fn read(path: &Path) -> Result<Vec<u8>> {
-    std::fs::read(path).with_context(|| format!("reading {}", path.display()))
+/// `-` in place of an input path reads standard input.
+fn is_stdin(path: &Path) -> bool {
+    path.as_os_str() == "-"
 }
 
-/// Check regular-file metadata first, then enforce the same cap while reading (files can grow).
+fn name(path: &Path) -> std::borrow::Cow<'_, str> {
+    if is_stdin(path) {
+        "standard input".into()
+    } else {
+        path.display().to_string().into()
+    }
+}
+
+pub fn read(path: &Path) -> Result<Vec<u8>> {
+    let bytes = if is_stdin(path) {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .lock()
+            .read_to_end(&mut bytes)
+            .map(|_| bytes)
+    } else {
+        std::fs::read(path)
+    };
+    bytes.with_context(|| format!("reading {}", name(path)))
+}
+
+/// Check regular-file metadata first, then enforce the same cap while reading (files can grow,
+/// and standard input has no size to check).
 pub fn read_recording(path: &Path, limits: Limits) -> Result<Vec<u8>> {
-    let file = std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
+    if is_stdin(path) {
+        return read_limited(std::io::stdin().lock(), limits)
+            .with_context(|| format!("reading {}", name(path)));
+    }
+    let file = std::fs::File::open(path).with_context(|| format!("reading {}", name(path)))?;
     if file
         .metadata()
-        .with_context(|| format!("reading {}", path.display()))?
+        .with_context(|| format!("reading {}", name(path)))?
         .len()
         > limits.max_bytes
     {
@@ -31,7 +59,7 @@ pub fn read_recording(path: &Path, limits: Limits) -> Result<Vec<u8>> {
         }
         .into());
     }
-    read_limited(file, limits).with_context(|| format!("reading {}", path.display()))
+    read_limited(file, limits).with_context(|| format!("reading {}", name(path)))
 }
 
 fn read_limited(reader: impl Read, limits: Limits) -> Result<Vec<u8>> {
@@ -49,7 +77,7 @@ fn read_limited(reader: impl Read, limits: Limits) -> Result<Vec<u8>> {
 }
 
 pub fn read_text(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+    String::from_utf8(read(path)?).with_context(|| format!("{} is not UTF-8", name(path)))
 }
 
 /// A vocabulary and the digest of the exact file it came from (what traces pin).
@@ -60,8 +88,8 @@ pub struct PinnedVocabulary {
 
 pub fn load_vocabulary(path: &Path) -> Result<PinnedVocabulary> {
     let bytes = read(path)?;
-    let vocabulary = Vocabulary::parse(&bytes)
-        .with_context(|| format!("loading vocabulary {}", path.display()))?;
+    let vocabulary =
+        Vocabulary::parse(&bytes).with_context(|| format!("loading vocabulary {}", name(path)))?;
     Ok(PinnedVocabulary {
         vocabulary,
         digest: sha256_hex(&bytes),
@@ -73,11 +101,13 @@ pub fn load_vocabulary(path: &Path) -> Result<PinnedVocabulary> {
 /// A failure before the rename leaves any existing file untouched. An interrupted process may
 /// leave a `.spoiler-*.tmp` file behind, never a partially written destination.
 pub fn publish(value: &impl Serialize, path: Option<&Path>) -> Result<()> {
+    publish_digest(value, path).map(drop)
+}
+
+/// [`publish`], returning the SHA-256 of the bytes written: what a reader of the file hashes.
+pub fn publish_digest(value: &impl Serialize, path: Option<&Path>) -> Result<String> {
     let Some(path) = path else {
-        let mut stdout = std::io::BufWriter::new(std::io::stdout().lock());
-        serde_json::to_writer(&mut stdout, value)?;
-        stdout.write_all(b"\n")?;
-        return Ok(stdout.flush()?);
+        return write_json(value, std::io::stdout().lock());
     };
     let directory = path
         .parent()
@@ -89,8 +119,10 @@ pub fn publish(value: &impl Serialize, path: Option<&Path>) -> Result<()> {
         directory.display()
     );
     let temporary = temporary_path(directory)?;
-    let written = write_synced(value, &temporary).and_then(|()| {
-        std::fs::rename(&temporary, path).with_context(|| format!("publishing {}", path.display()))
+    let written = write_synced(value, &temporary).and_then(|digest| {
+        std::fs::rename(&temporary, path)
+            .with_context(|| format!("publishing {}", path.display()))?;
+        Ok(digest)
     });
     if written.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -98,24 +130,57 @@ pub fn publish(value: &impl Serialize, path: Option<&Path>) -> Result<()> {
     written
 }
 
+/// The SHA-256 [`publish`] would report for `value`, without writing it anywhere.
+pub fn digest(value: &impl Serialize) -> Result<String> {
+    write_json(value, std::io::sink())
+}
+
 fn temporary_path(directory: &Path) -> Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     Ok(directory.join(format!(".spoiler-{}-{nanos}.tmp", std::process::id())))
 }
 
-fn write_synced(value: &impl Serialize, path: &Path) -> Result<()> {
+fn write_synced(value: &impl Serialize, path: &Path) -> Result<String> {
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .with_context(|| format!("creating {}", path.display()))?;
-    let mut writer = std::io::BufWriter::new(file);
+    let digest = write_json(value, &file)?;
+    file.sync_all()?;
+    Ok(digest)
+}
+
+/// Compact JSON and a newline: the one published form, hashed as it streams out.
+fn write_json(value: &impl Serialize, writer: impl Write) -> Result<String> {
+    let mut writer = std::io::BufWriter::new(Hashing {
+        inner: writer,
+        hasher: Sha256::new(),
+    });
     serde_json::to_writer(&mut writer, value)?;
     writer.write_all(b"\n")?;
-    writer.flush()?;
-    writer.get_ref().sync_all()?;
-    Ok(())
+    let mut hashing = writer.into_inner().map_err(|error| error.into_error())?;
+    hashing.inner.flush()?;
+    Ok(format!("{:x}", hashing.hasher.finalize()))
 }
+
+struct Hashing<W> {
+    inner: W,
+    hasher: Sha256,
+}
+
+impl<W: Write> Write for Hashing<W> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buffer)?;
+        self.hasher.update(&buffer[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

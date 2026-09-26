@@ -42,11 +42,37 @@ mkdir -p artifacts
 
 ## Commands
 
+Every input path accepts `-` for standard input, so commands compose with pipes:
+
+```sh
+spoiler recordings fetch --project 123 --session SESSION_ID \
+  | spoiler compile --recording - --vocab vocab.yaml --app web \
+  | spoiler analyze --trace - --vocab vocab.yaml --prepare-only
+```
+
+- `spoiler run` does all of that in one step: it fetches a recording (`--session ID --project ID`) or reads one (`--recording FILE|-`), compiles it, and narrates every visit with user gestures (`--visit N` for just one). It writes one `session` artifact holding the recording's `source`, the `trace`, and per visit either an `analysis` (`--model`) or a `request` (`--prepare-only`). `--save-recording FILE` and `--save-trace FILE` also write the intermediate artifacts, byte for byte what `recordings fetch` and `compile` would write, so analyses' `trace_digest` matches the saved trace. A failed visit fails the whole run; nothing partial is written.
 - `spoiler decode --recording FILE [--out FILE]` normalizes a recording to a versioned recording artifact. Inputs include decoded rrweb event arrays, JSONL, compressed inputs, and PostHog snapshot lines.
 - `spoiler compile --recording FILE --vocab FILE --app APP [--out FILE]` creates a trace without network access. `--timings` prints stage timings on stderr.
-- `spoiler analyze --trace FILE --vocab FILE` accepts exactly one of `--prepare-only`, `--response FILE`, or `--model MODEL`. Alternatively supply `--recording FILE --app APP` instead of `--trace`; `--visit N` selects one visit (zero-based). `--context FILE` adds a session header and `--system-prompt FILE` replaces the narration instructions. A model call requires `OPENROUTER_API_KEY` in the environment; no model is selected implicitly.
-- `spoiler vocab check --vocab FILE [--out FILE]` checks matcher validity and reports inert entries. `spoiler vocab build --config PRODUCT.json --source ROUTES.txt --source CONTROLS.txt --source-revision REV --model MODEL --out VOCAB.json` builds a snapshot from explicit UTF-8 source files and a product config (`apps`, including project, host, and audience). It requires `OPENROUTER_API_KEY`, unless `--candidate FILE` supplies an already prepared vocabulary instead of `--model`. Consumers accept YAML/JSON vocabulary files or verified snapshots; they never regenerate implicitly.
+- `spoiler analyze --trace FILE --vocab FILE` prepares the model request (`--prepare-only`), validates an existing answer (`--response FILE`), or calls a model (`--model MODEL`); the first two take precedence over a model. Alternatively supply `--recording FILE --app APP` instead of `--trace`; `--visit N` selects one visit (zero-based). `--context FILE` adds a session header and `--system-prompt FILE` replaces the narration instructions. A model call requires `OPENROUTER_API_KEY` in the environment; no model is selected implicitly.
+- `spoiler vocab check --vocab FILE [--out FILE]` checks matcher validity and reports inert entries. `spoiler vocab build --config PRODUCT.json --source ROUTES.txt --source CONTROLS.txt --source-revision REV --model MODEL --out VOCAB.json` builds a snapshot from explicit UTF-8 source files and a product config (`apps`, including project, host, and audience). It requires `OPENROUTER_API_KEY`, unless `--candidate FILE` supplies an already prepared vocabulary, which takes precedence over `--model`. Consumers accept YAML/JSON vocabulary files or verified snapshots; they never regenerate implicitly.
 - `spoiler recordings list --project ID --since START --until END --limit 100 [--cursor FILE] [--out FILE]` discovers one page; `spoiler recordings fetch --project ID --session ID [--out FILE]` downloads snapshots. Both require `POSTHOG_API_KEY` in the environment. The default host is `https://eu.posthog.com`; use `--host` for another PostHog instance.
+
+### Environment
+
+Settings that rarely change between invocations fall back to environment variables. A flag always wins, and `--help` shows each variable next to its flag.
+
+| Variable | Flag | Used by |
+| --- | --- | --- |
+| `SPOILER_VOCAB` | `--vocab` | `compile`, `analyze`, `run`, `vocab check` |
+| `SPOILER_APP` | `--app` | `compile`, `analyze`, `run` |
+| `SPOILER_MODEL` | `--model` | `analyze`, `run`, `vocab build` |
+| `SPOILER_OPENROUTER_URL` | `--openrouter-url` | `analyze`, `run`, `vocab build` |
+| `SPOILER_POSTHOG_PROJECT` | `--project` | `recordings`, `run` |
+| `SPOILER_POSTHOG_HOST` | `--host` | `recordings`, `run` |
+| `SPOILER_TIMEOUT` | `--timeout` | network commands |
+| `SPOILER_MAX_INPUT_MIB` | `--max-input-mib` | all |
+
+Credentials are environment-only, never flags: `POSTHOG_API_KEY` (a personal API key with read access to recordings) and `OPENROUTER_API_KEY`. `SPOILER_APP` is checked against a trace's app in `analyze --trace`, so unset it when analyzing traces from several apps.
 
 For example, with a PostHog key set:
 
@@ -74,11 +100,11 @@ thresholds: { slow_ms: 3000 }
 
 Without grid conventions, rows are identified by their label, the first column labels a row, and a grid cell inherits its column feature only if it has no feature of its own. English error-message patterns and common monitoring-request filters apply by default. Review model-generated matchers before promoting a vocabulary; `vocab check` warns about app-chrome features (`surface: "*"`) with no app.
 
-The binary embeds `prompts/narrate/system.md`, `prompts/narrate/response.schema.json`, and `prompts/vocabulary/system.md`. A custom narration prompt can be supplied via `--system-prompt`. Prompt provenance records its name and digest; `request_digest` covers the exact model messages and response schema. Prompt changes should be reviewed against prepared requests and real answers: automated checks do not measure narration quality.
+The binary embeds `crates/core/prompts/narrate/system.md`, `crates/core/prompts/narrate/response.schema.json`, and `crates/core/prompts/vocabulary/system.md`. A custom narration prompt can be supplied via `--system-prompt`. Prompt provenance records its name and digest; `request_digest` covers the exact model messages and response schema. Prompt changes should be reviewed against prepared requests and real answers: automated checks do not measure narration quality.
 
 ## Artifacts, validation, and limits
 
-Every artifact has a `kind` and per-kind `schema_version`: `trace`, `analysis_request`, and `analysis` use schema version 2; the other kinds use version 1. A trace records its compiler version and SHA-256 digests of the recording and vocabulary. Readers reject incompatible kinds, schemas, compiler versions, invalid trace bounds/refs, and vocabulary mismatches. Trace refs (`e1`, `e2`, …) identify actions within one trace, including when analyzing a single visit. Visits split after 30 minutes without actions across tabs; a scheduler can analyze each visit with gestures separately.
+Every artifact has a `kind` and per-kind `schema_version`: `trace`, `analysis_request`, and `analysis` use schema version 2; the other kinds (`recording`, `recording_page`, `session`, `vocabulary_snapshot`, `vocabulary_check`) use version 1. A trace records its compiler version and SHA-256 digests of the recording and vocabulary. Readers reject incompatible kinds, schemas, compiler versions, invalid trace bounds/refs, and vocabulary mismatches. Trace refs (`e1`, `e2`, …) identify actions within one trace, including when analyzing a single visit. Visits split after 30 minutes without actions across tabs; a scheduler can analyze each visit with gestures separately.
 
 The trace's `coverage` reports duplicate, uninterpreted, or malformed events and opaque mounts such as iframes and canvases. Validated analyses retain only trace-supported claims, derive signal lists and uncited gestures, and report unsupported duration claims. OpenRouter calls request zero-data-retention routing and required parameter support. Invalid model answers can receive one corrected retry; `--response` applies the same acceptance bar offline without retrying.
 

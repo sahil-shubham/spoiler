@@ -11,3 +11,6 @@ All notable changes to this project will be documented in this file. The format 
 - Discover and fetch recordings from PostHog; build and check pinned product vocabularies.
 - Prepare narration requests, call OpenRouter, or validate model responses offline with trace-grounded evidence and provenance.
 - Synthetic behavior corpus with golden traces for compiler rules.
+- `spoiler run`: fetch or read, compile, and narrate every visit with gestures in one step, as one `session` artifact.
+- `-` reads any input path from standard input; `SPOILER_*` environment variables supply defaults for vocabulary, app, model, PostHog project and host, timeouts and input limits.
+- Python wheels (`pip install spoiler`) that install the binary.

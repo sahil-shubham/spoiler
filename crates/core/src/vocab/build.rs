@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use serde_json::Value;
 
 /// The vocabulary-building instructions (`prompts/vocabulary/system.md`).
-pub const SYSTEM_PROMPT: &str = include_str!("../../../../prompts/vocabulary/system.md");
+pub const SYSTEM_PROMPT: &str = include_str!("../../prompts/vocabulary/system.md");
 
 pub fn prompt_id() -> PromptId {
     PromptId::of("vocabulary", &[SYSTEM_PROMPT])

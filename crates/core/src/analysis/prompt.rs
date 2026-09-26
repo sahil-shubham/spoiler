@@ -8,11 +8,11 @@ use serde_json::Value;
 use std::{collections::HashSet, sync::LazyLock};
 
 /// The built-in narration instructions (`prompts/narrate/system.md`).
-pub const SYSTEM_PROMPT: &str = include_str!("../../../../prompts/narrate/system.md");
+pub const SYSTEM_PROMPT: &str = include_str!("../../prompts/narrate/system.md");
 
 /// The response schema (`prompts/narrate/response.schema.json`). Its descriptions steer the
 /// model as much as the system prompt does, so it lives beside it.
-const RESPONSE_SCHEMA: &str = include_str!("../../../../prompts/narrate/response.schema.json");
+const RESPONSE_SCHEMA: &str = include_str!("../../prompts/narrate/response.schema.json");
 
 /// Strict JSON schema for the model's answer. Field order is load-bearing: reasoning comes before
 /// verdicts, so the model works before it concludes.

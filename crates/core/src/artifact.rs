@@ -65,6 +65,7 @@ pub enum Kind {
     VocabularySnapshot,
     VocabularyCheck,
     RecordingPage,
+    Session,
 }
 
 impl Kind {
@@ -78,7 +79,8 @@ impl Kind {
             Self::Recording
             | Self::VocabularySnapshot
             | Self::VocabularyCheck
-            | Self::RecordingPage => 1,
+            | Self::RecordingPage
+            | Self::Session => 1,
         }
     }
 }
@@ -295,6 +297,35 @@ pub struct ModelUsage {
     pub tokens_in: u64,
     pub tokens_out: u64,
     pub cost_usd: f64,
+}
+
+/// A narration of one trace or visit: the model request alone, or the validated analysis.
+// A handful per run, each serialized once: boxing would buy nothing.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Narration {
+    Request(AnalysisRequest),
+    Analysis(AnalysisArtifact),
+}
+
+/// One recording taken end to end by `spoiler run`: where it came from, its trace, and a
+/// narration of each visit with user gestures.
+#[derive(Clone, Debug, Serialize)]
+pub struct SessionArtifact {
+    #[serde(flatten)]
+    pub header: Header,
+    pub source: RecordingSource,
+    pub trace: TraceArtifact,
+    pub visits: Vec<VisitNarration>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct VisitNarration {
+    /// Index into the trace's `visits`.
+    pub visit: usize,
+    #[serde(flatten)]
+    pub narration: Narration,
 }
 
 /// What `spoiler vocab check` reports about a vocabulary file.

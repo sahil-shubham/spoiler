@@ -17,6 +17,7 @@ const TOKEN: &str = "OPENROUTER_API_KEY";
 pub struct OpenRouter {
     http: Http,
     base_url: String,
+    token: String,
     pub model: String,
 }
 
@@ -67,10 +68,12 @@ struct ChoiceMessage {
 }
 
 impl OpenRouter {
+    /// Fails without the API key, before any work that would need a model is started.
     pub fn new(base_url: &str, model: &str, timeout_seconds: u64) -> Result<Self> {
         Ok(Self {
             http: Http::new(timeout_seconds)?,
             base_url: base_url.trim_end_matches('/').to_owned(),
+            token: credential(TOKEN)?,
             model: model.to_owned(),
         })
     }
@@ -93,7 +96,7 @@ impl OpenRouter {
             "usage": { "include": true },
         });
         let url = format!("{}/chat/completions", self.base_url);
-        let text = self.http.post_json(&url, &credential(TOKEN)?, &body)?;
+        let text = self.http.post_json(&url, &self.token, &body)?;
         let response: Response =
             serde_json::from_str(&text).context("completion response has an unexpected shape")?;
         let content = response
