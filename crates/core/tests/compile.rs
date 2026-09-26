@@ -132,6 +132,405 @@ fn a_bare_query_string_is_not_part_of_the_path() {
     assert_eq!(actions[0].surface.as_deref(), Some("demo.page"));
 }
 
+fn mobile_element(id: i64, tag: &str, rect: [i64; 4], label: &str) -> Value {
+    let [x, y, width, height] = rect;
+    let children = if label.is_empty() {
+        Vec::new()
+    } else {
+        vec![json!({ "id": id + 1000, "type": 3, "textContent": label })]
+    };
+    json!({
+        "id": id, "type": 2, "tagName": tag,
+        "attributes": {
+            "data-spoiler-mobile-x": x.to_string(),
+            "data-spoiler-mobile-y": y.to_string(),
+            "data-spoiler-mobile-width": width.to_string(),
+            "data-spoiler-mobile-height": height.to_string(),
+        },
+        "childNodes": children,
+    })
+}
+
+fn mobile_page(children: Vec<Value>) -> Value {
+    json!({ "node": { "id": 1, "type": 0, "childNodes": [
+        { "id": 2, "type": 2, "tagName": "body", "childNodes": children }
+    ]}})
+}
+
+fn touch(at: f64, kind: i32, id: i64, x: i64, y: i64) -> Event {
+    event(
+        "a",
+        at,
+        3,
+        json!({ "source": 2, "type": kind, "id": id, "x": x, "y": y }),
+    )
+}
+
+fn mobile_compile(events: &[Event]) -> Compilation {
+    let vocabulary = Vocabulary::from_document(json!({
+        "version": 1,
+        "apps": { "demo": { "project": 1, "host": "example.test", "audience": "users" } },
+        "surfaces": [
+            { "id": "demo.home", "app": "demo", "route": "Home", "name": "Home" },
+            { "id": "demo.settings", "app": "demo", "route": "Settings", "name": "Settings" }
+        ],
+        "features": [
+            { "id": "save", "surface": "demo.home", "name": "Save",
+              "matchers": { "text": ["Save"] } }
+        ]
+    }))
+    .unwrap();
+    let recording = Recording::from_events(events).unwrap();
+    compile(&recording, &Matcher::new(&vocabulary), "demo").unwrap()
+}
+fn ios_full_button(label: &str) -> Value {
+    json!({ "initialOffset":{"top":0,"left":0}, "wireframes": [
+        { "id": 10000000, "type": "input", "inputType": "button", "disabled": false,
+          "x": 100, "y": 100, "width": 120, "height": 45, "value": label }
+    ] })
+}
+
+#[test]
+fn ios_successive_full_frames_report_tap_text_change_but_not_later_idle_frames() {
+    let compiled = mobile_compile(&[
+        event("a", 0.0, 4, json!({ "href": "Home" })),
+        event("a", 1.0, 2, ios_full_button("Save")),
+        touch(100.0, 7, 0, 130, 120),
+        touch(120.0, 9, 0, 130, 120),
+        event("a", 145.0, 2, ios_full_button("Saved")),
+        event("a", 3300.0, 2, ios_full_button("Done")),
+    ]);
+    let click = compiled
+        .actions
+        .iter()
+        .find(|a| a.kind() == ActionKind::Click)
+        .unwrap();
+    assert_eq!(click.target().as_deref(), Some("button \"Save\""));
+    assert_eq!(click.path.as_deref(), Some("Home"));
+    assert_eq!(click.surface.as_deref(), Some("demo.home"));
+    assert!(
+        matches!(
+            click.effects.as_slice(),
+            [spoiler_core::trace::Effect {
+                change: Change::Text { before: Some(before), text, .. },
+                ..
+            }] if before == "Save" && text == "Saved"
+        ),
+        "{:?}",
+        click.effects
+    );
+    assert_eq!(click.reaction().map(|r| r.react_ms), Some(Millis(25.0)));
+    assert!(click.flags.is_empty(), "{:?}", click.flags);
+}
+
+#[test]
+fn ios_screenshot_only_full_frames_do_not_manufacture_a_pixel_effect() {
+    let screenshot = |id, image| {
+        json!({ "initialOffset":{"top":0,"left":0}, "wireframes": [
+        { "id": id, "type": "screenshot", "x": 0, "y": 0,
+          "width": 390, "height": 850, "base64": image }
+    ] })
+    };
+    let compiled = mobile_compile(&[
+        event("a", 0.0, 4, json!({ "href": "Home" })),
+        event("a", 1.0, 2, screenshot(10000000, "before")),
+        touch(100.0, 7, 0, 120, 340),
+        touch(120.0, 9, 0, 120, 340),
+        event("a", 150.0, 2, screenshot(10000001, "after")),
+    ]);
+    let click = compiled
+        .actions
+        .iter()
+        .find(|a| a.kind() == ActionKind::Click)
+        .unwrap();
+    assert_eq!(click.target().as_deref(), Some("screen (120,340)"));
+    assert!(click.effects.is_empty(), "{:?}", click.effects);
+    assert!(click.reaction().is_none());
+    assert!(click.flags.is_empty());
+    assert!(compiled.coverage.screenshot_only);
+}
+
+#[test]
+fn ios_navigation_on_touch_down_keeps_tap_on_source_surface() {
+    let compiled = mobile_compile(&[
+        event("a", 0.0, 4, json!({ "href": "Home" })),
+        event("a", 1.0, 2, ios_full_button("Save")),
+        touch(100.0, 7, 0, 130, 120),
+        event("a", 110.0, 4, json!({ "href": "Settings" })),
+        event("a", 115.0, 2, ios_full_button("Continue")),
+        touch(125.0, 9, 0, 130, 120),
+    ]);
+    let click = compiled
+        .actions
+        .iter()
+        .find(|a| a.kind() == ActionKind::Click)
+        .unwrap();
+    assert_eq!(click.target().as_deref(), Some("button \"Save\""));
+    assert_eq!(click.path.as_deref(), Some("Home"));
+    assert_eq!(click.surface.as_deref(), Some("demo.home"));
+    assert!(click.effects.iter().any(|effect| matches!(
+        &effect.change,
+        Change::Nav { to } if to == "Settings"
+    )));
+    assert!(
+        compiled
+            .actions
+            .iter()
+            .any(|action| action.kind() == ActionKind::Nav
+                && action.path.as_deref() == Some("Settings")
+                && action.surface.as_deref() == Some("demo.settings"))
+    );
+}
+
+#[test]
+fn native_tap_hits_absolute_nested_button_over_screenshot_chrome_and_inert_overlay() {
+    let mut screenshot = mobile_element(3, "img", [0, 0, 390, 850], "");
+    screenshot["attributes"]["data-posthog-screenshot"] = json!("true");
+    let mut chrome = mobile_element(4, "div", [0, 0, 390, 200], "System overlay");
+    chrome["attributes"]["data-spoiler-mobile-chrome"] = json!("true");
+    let mut card = mobile_element(5, "div", [80, 90, 220, 200], "");
+    let mut button = mobile_element(6, "button", [105, 125, 110, 48], "Save");
+    button["attributes"]["data-testid"] = json!("save");
+    card["childNodes"].as_array_mut().unwrap().push(button);
+    let overlay = mobile_element(7, "div", [95, 110, 140, 75], "Decorative overlay");
+    let events = [
+        event("a", 0.0, 4, json!({ "href": "Home" })),
+        event(
+            "a",
+            1.0,
+            2,
+            mobile_page(vec![screenshot, chrome, card, overlay]),
+        ),
+        touch(100.0, 7, 0, 112, 145),
+        // Native controls may respond on touch-down, before the touch-end completes the tap.
+        event(
+            "a",
+            110.0,
+            3,
+            json!({ "source": 0, "texts": [{ "id": 1006, "value": "Saved" }] }),
+        ),
+        touch(120.0, 9, 0, 112, 145),
+        event("a", 170.0, 4, json!({ "href": "Settings" })),
+    ];
+    let compiled = mobile_compile(&events);
+    let clicks: Vec<_> = compiled
+        .actions
+        .iter()
+        .filter(|action| action.kind() == ActionKind::Click)
+        .collect();
+    assert_eq!(clicks.len(), 1, "touch start and end are one click");
+    let click = clicks[0];
+    let Detail::Click(press) = &click.detail else {
+        unreachable!();
+    };
+    assert_eq!(press.control.node, 6);
+    assert_eq!(press.control.target, "button[save] \"Save\"");
+    assert_eq!(press.control.feature.as_deref(), Some("save"));
+    assert!(
+        press
+            .control
+            .element
+            .as_ref()
+            .unwrap()
+            .element
+            .data
+            .keys()
+            .all(|name| !name.starts_with("spoiler-mobile-"))
+    );
+    assert_eq!(click.path.as_deref(), Some("Home"));
+    assert_eq!(click.surface.as_deref(), Some("demo.home"));
+    assert_eq!(click.reaction().map(|r| r.react_ms), Some(Millis(-10.0)));
+    assert!(click.flags.is_empty(), "{:?}", click.flags);
+    assert!(
+        click
+            .effects
+            .iter()
+            .any(|effect| matches!(&effect.change, Change::Text { text, .. } if text == "Saved"))
+    );
+    assert!(
+        click
+            .effects
+            .iter()
+            .any(|effect| matches!(&effect.change, Change::Nav { to } if to == "Settings"))
+    );
+    assert!(compiled.actions.iter().any(|action| {
+        action.kind() == ActionKind::Nav
+            && action.path.as_deref() == Some("Settings")
+            && action.surface.as_deref() == Some("demo.settings")
+    }));
+    assert!(
+        !compiled.coverage.screenshot_only,
+        "a labelled wireframe is available"
+    );
+}
+
+#[test]
+fn screenshot_only_touch_uses_coordinates_without_false_dead_or_unresponsive_flag() {
+    let mut image = mobile_element(3, "img", [0, 0, 390, 850], "");
+    image["attributes"]["data-posthog-screenshot"] = json!("true");
+    let mut chrome = mobile_element(4, "div", [0, 0, 390, 75], "12:30");
+    chrome["attributes"]["data-spoiler-mobile-chrome"] = json!("true");
+    let compiled = mobile_compile(&[
+        event("a", 0.0, 4, json!({ "href": "Home" })),
+        event("a", 1.0, 2, mobile_page(vec![image, chrome])),
+        touch(100.0, 7, 5, 120, 340),
+        touch(125.0, 9, 5, 121, 340),
+    ]);
+    assert!(compiled.coverage.screenshot_only);
+    assert_eq!(compiled.coverage.opaque_mounts["mobile_screenshot"], 1);
+    let clicks: Vec<_> = compiled
+        .actions
+        .iter()
+        .filter(|action| action.kind() == ActionKind::Click)
+        .collect();
+    assert_eq!(clicks.len(), 1);
+    let Detail::Click(press) = &clicks[0].detail else {
+        unreachable!();
+    };
+    assert_eq!(press.control.target, "screen (120,340)");
+    assert!(press.control.element.is_none());
+    assert!(press.control.feature.is_none());
+    assert_eq!(press.class, spoiler_core::trace::TargetClass::Unresolved);
+    assert!(clicks[0].flags.is_empty(), "{:?}", clicks[0].flags);
+}
+
+#[test]
+fn native_hit_chooses_later_interactive_overlap_and_ignores_hidden_descendants() {
+    let first = mobile_element(3, "button", [100, 100, 100, 70], "First");
+    let mut second = mobile_element(4, "button", [100, 100, 100, 70], "Second");
+    let mut hidden = mobile_element(5, "button", [105, 105, 60, 50], "Hidden");
+    hidden["attributes"]["hidden"] = json!(true);
+    second["childNodes"].as_array_mut().unwrap().push(hidden);
+    let note = mobile_element(6, "div", [250, 100, 100, 70], "Note");
+    let compiled = mobile_compile(&[
+        event("a", 0.0, 2, mobile_page(vec![first, second, note])),
+        touch(100.0, 7, 0, 120, 120),
+        touch(125.0, 9, 0, 120, 120),
+        touch(500.0, 7, 0, 280, 120),
+        touch(525.0, 9, 0, 280, 120),
+    ]);
+    let clicks: Vec<_> = compiled
+        .actions
+        .iter()
+        .filter(|action| action.kind() == ActionKind::Click)
+        .collect();
+    assert_eq!(clicks.len(), 2);
+    assert_eq!(clicks[0].target().as_deref(), Some("button \"Second\""));
+    assert_eq!(clicks[0].flags, [Flag::Unresponsive]);
+    assert_eq!(clicks[1].target().as_deref(), Some("div \"Note\""));
+    assert_eq!(clicks[1].flags, [Flag::Dead]);
+}
+
+#[test]
+fn blank_wireframe_is_a_dead_tap_but_screenshot_wrapper_is_not_a_named_target() {
+    let blank = mobile_compile(&[
+        event(
+            "a",
+            0.0,
+            2,
+            mobile_page(vec![mobile_element(3, "div", [0, 0, 390, 850], "")]),
+        ),
+        touch(100.0, 7, 0, 100, 200),
+        touch(125.0, 9, 0, 100, 200),
+    ]);
+    let blank_click = blank
+        .actions
+        .iter()
+        .find(|action| action.kind() == ActionKind::Click)
+        .unwrap();
+    assert_eq!(blank_click.target().as_deref(), Some("div"));
+    assert_eq!(blank_click.flags, [Flag::Dead]);
+
+    let mut wrapper = mobile_element(3, "div", [0, 0, 390, 850], "");
+    let mut image = mobile_element(4, "img", [0, 0, 390, 850], "");
+    image["attributes"]["data-posthog-screenshot"] = json!("true");
+    wrapper["childNodes"].as_array_mut().unwrap().push(image);
+    let screenshot = mobile_compile(&[
+        event("a", 0.0, 2, mobile_page(vec![wrapper])),
+        touch(100.0, 7, 0, 100, 200),
+        touch(125.0, 9, 0, 100, 200),
+    ]);
+    let screenshot_click = screenshot
+        .actions
+        .iter()
+        .find(|action| action.kind() == ActionKind::Click)
+        .unwrap();
+    assert_eq!(
+        screenshot_click.target().as_deref(),
+        Some("screen (100,200)")
+    );
+    assert!(screenshot.coverage.screenshot_only);
+    assert!(screenshot_click.flags.is_empty());
+}
+
+#[test]
+fn screenshot_added_by_mutation_enables_coordinate_taps_and_screenshot_only_coverage() {
+    let mut image = mobile_element(3, "img", [0, 0, 390, 850], "");
+    image["attributes"]["data-posthog-screenshot"] = json!("true");
+    let compiled = mobile_compile(&[
+        event("a", 0.0, 2, mobile_page(vec![])),
+        event(
+            "a",
+            20.0,
+            3,
+            json!({ "source": 0, "adds": [
+                { "parentId": 2, "nextId": null, "node": image }
+            ] }),
+        ),
+        touch(100.0, 7, 0, 80, 200),
+        touch(120.0, 9, 0, 80, 200),
+    ]);
+    assert_eq!(compiled.coverage.opaque_mounts["mobile_screenshot"], 1);
+    assert!(compiled.coverage.screenshot_only);
+    let click = compiled
+        .actions
+        .iter()
+        .find(|action| action.kind() == ActionKind::Click)
+        .unwrap();
+    assert_eq!(click.target().as_deref(), Some("screen (80,200)"));
+}
+
+#[test]
+fn native_swipes_do_not_create_clicks_and_web_touch_ends_remain_unchanged() {
+    let mobile = mobile_compile(&[
+        event(
+            "a",
+            0.0,
+            2,
+            mobile_page(vec![mobile_element(3, "button", [10, 20, 100, 40], "Save")]),
+        ),
+        touch(100.0, 7, 0, 20, 30),
+        touch(140.0, 9, 0, 180, 290),
+    ]);
+    assert!(!mobile.actions.iter().any(|action| action.kind().is_click()));
+    let web = run(&[
+        event("a", 0.0, 2, page("Save")),
+        event(
+            "a",
+            100.0,
+            3,
+            json!({
+                "source": 2, "type": 7, "id": 3, "x": 20, "y": 30, "pointerType": 2
+            }),
+        ),
+        event(
+            "a",
+            140.0,
+            3,
+            json!({
+                "source": 2, "type": 9, "id": 3, "x": 20, "y": 30, "pointerType": 2
+            }),
+        ),
+        event("a", 150.0, 3, click(3)),
+    ]);
+    let clicks: Vec<_> = web
+        .iter()
+        .filter(|action| action.kind() == ActionKind::Click)
+        .collect();
+    assert_eq!(clicks.len(), 1);
+    assert_eq!(clicks[0].target().as_deref(), Some("button \"Save\""));
+}
+
 /// The typed signal of a single event.
 fn signal(event: Event) -> Signal {
     let recording = Recording::from_events(&[event]).unwrap();

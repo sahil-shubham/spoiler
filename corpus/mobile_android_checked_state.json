@@ -1,0 +1,102 @@
+{
+ "description": "An Android checkbox update records the checked state as the tap's visible effect.",
+ "app": "mobile",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 1756000000000,
+   "data": {
+    "href": "EditorScreen",
+    "width": 390,
+    "height": 844
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 1756000000000,
+   "data": {
+    "wireframes": [
+     {
+      "id": 10000002,
+      "type": "div",
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "childWireframes": [
+       {
+        "id": 10000001,
+        "type": "input",
+        "x": 24,
+        "y": 160,
+        "width": 180,
+        "height": 48,
+        "inputType": "checkbox",
+        "disabled": false,
+        "checked": false,
+        "label": "Notifications"
+       }
+      ]
+     }
+    ],
+    "initialOffset": {
+     "top": 0,
+     "left": 0
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001000,
+   "data": {
+    "source": 2,
+    "id": 0,
+    "pointerType": 2,
+    "x": 72,
+    "y": 180,
+    "type": 7
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001050,
+   "data": {
+    "source": 2,
+    "id": 0,
+    "pointerType": 2,
+    "x": 72,
+    "y": 180,
+    "type": 9
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001200,
+   "data": {
+    "source": 0,
+    "updates": [
+     {
+      "parentId": 10000002,
+      "wireframe": {
+       "id": 10000001,
+       "type": "input",
+       "x": 24,
+       "y": 160,
+       "width": 180,
+       "height": 48,
+       "inputType": "checkbox",
+       "disabled": false,
+       "checked": true,
+       "label": "Notifications"
+      }
+     }
+    ]
+   },
+   "win": "w1"
+  }
+ ]
+}

@@ -2,11 +2,17 @@
 version: 1
 apps:
   demo: { project: 1, host: demo.test, audience: "people using the demo product" }
+  mobile: { project: 2, host: mobile.demo.test, audience: "people using the demo mobile app" }
 surfaces:
   - { id: demo.page, app: demo, route: /page, name: "Page" }
   - { id: demo.other, app: demo, route: /other, name: "Other page" }
   - { id: demo.item, app: demo, route: "/items/:id", name: "Item" }
   - { id: demo.item-create, app: demo, route: /items/new, name: "Create item" }
+  # Native Meta href is the screen name, not necessarily a URL pathname.
+  - { id: mobile.home, app: mobile, route: HomeScreen, name: "Home" }
+  - { id: mobile.settings, app: mobile, route: SettingsScreen, name: "Settings" }
+  - { id: mobile.editor, app: mobile, route: EditorScreen, name: "Editor" }
+  - { id: mobile.gallery, app: mobile, route: GalleryScreen, name: "Gallery" }
 features:
   - { id: demo.chrome.search, surface: "*", app: demo, name: "Global search", matchers: { text: [Search] } }
   - { id: demo.create.search, surface: demo.item-create, name: "Search similar items", matchers: { text: [Search] } }

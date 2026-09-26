@@ -74,6 +74,9 @@ pub mod source {
 pub enum Signal {
     /// The page, re-serialized from scratch (often under new node ids).
     FullSnapshot(SerializedNode),
+    /// A native iOS/Android wireframe frame, converted to synthetic DOM.
+    /// Unlike web full snapshots, successive native frames can be a gesture's reaction.
+    NativeFullSnapshot(SerializedNode),
     /// The tab's URL.
     Meta {
         href: String,
@@ -533,6 +536,8 @@ pub struct Mutation {
     pub removes: Vec<Remove>,
     pub texts: Vec<TextChange>,
     pub attributes: Vec<AttributeChange>,
+    /// Native update ids replace the old subtree; rrweb remove+add with the same id is a move.
+    pub replacements: Vec<NodeId>,
 }
 
 /// A mutation's data as recorded: lists, or strings packed by posthog-js.
@@ -586,6 +591,7 @@ impl MutationData {
             removes,
             texts,
             attributes,
+            replacements: Vec::new(),
         }))
     }
 }
@@ -618,7 +624,8 @@ pub enum Interaction {
     ContextMenu,
     DblClick,
     TouchStart,
-    /// Mouse-up, focus, blur, touch-end and the rest: not gestures the compiler acts on.
+    TouchEnd,
+    /// Mouse-up, focus, blur and the rest: not gestures the compiler acts on.
     Other,
 }
 
@@ -644,6 +651,7 @@ impl Mouse {
             Some(3) => Interaction::ContextMenu,
             Some(4) => Interaction::DblClick,
             Some(7) => Interaction::TouchStart,
+            Some(9) => Interaction::TouchEnd,
             _ => Interaction::Other,
         };
         Some(Self {

@@ -9,6 +9,7 @@
 //! event arrays or JSONL (optionally gzip/zstd-compressed, as fixture stores keep them),
 //! and raw PostHog snapshot lines.
 
+mod mobile;
 mod posthog;
 pub mod rrweb;
 
@@ -17,7 +18,13 @@ use rrweb::{Input, Mouse, MutationData, SelectionRange, Signal};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeSeq};
 use serde_json::{Value, value::RawValue};
-use std::{borrow::Cow, cell::Cell, io::Read, path::Path};
+use std::{
+    borrow::Cow,
+    cell::{Cell, RefCell},
+    collections::HashSet,
+    io::Read,
+    path::Path,
+};
 
 /// One rrweb event as an owned value: for building recordings in code. Decoded recordings keep
 /// events as text instead (see [`Recording`]).
@@ -188,7 +195,12 @@ fn replace_lone_surrogates(json: &mut [u8]) {
 #[derive(Clone, Copy, Debug)]
 enum Data {
     Null,
-    Span { start: usize, end: usize },
+    Span {
+        start: usize,
+        end: usize,
+    },
+    /// Minimal document inserted before a first screenshot incremental without a full snapshot.
+    MinimalScreenshot,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -207,6 +219,9 @@ pub struct Recording {
     entries: Vec<Entry>,
     tabs: Vec<String>,
     malformed_snapshot_lines: usize,
+    mobile_contexts: Option<Vec<mobile::Context>>,
+    mobile_reserved: Vec<HashSet<rrweb::NodeId>>,
+    mobile_ids: RefCell<Vec<rrweb::NodeId>>,
     budget: Budget,
 }
 
@@ -220,6 +235,8 @@ pub struct EventRef<'r> {
     tab: u32,
     data: &'r str,
     compressed: bool,
+    mobile_context: mobile::Context,
+    synthetic_full: bool,
 }
 
 impl EventRef<'_> {
@@ -367,7 +384,7 @@ impl Recording {
         replace_lone_surrogates(&mut bytes);
         // Only ASCII escapes changed, so the text is still UTF-8.
         let text = String::from_utf8(bytes).map_err(|_| DecodeError::NotUtf8("recording"))?;
-        let (entries, tabs, malformed_snapshot_lines) = {
+        let (mut entries, tabs, malformed_snapshot_lines) = {
             let mut indexer = Indexer::new(&text);
             index(&mut indexer)?;
             (
@@ -376,12 +393,21 @@ impl Recording {
                 indexer.malformed_snapshot_lines,
             )
         };
+        let (mobile_contexts, mobile_reserved) =
+            match mobile::index_contexts(&mut entries, &text, tabs.len()) {
+                Some((contexts, reserved)) => (Some(contexts), reserved),
+                None => (None, Vec::new()),
+            };
+        let mobile_ids = RefCell::new(vec![100; tabs.len()]);
         Ok(Self {
             text,
             entries,
             tabs,
             budget,
             malformed_snapshot_lines,
+            mobile_contexts,
+            mobile_reserved,
+            mobile_ids,
         })
     }
 
@@ -446,17 +472,25 @@ impl Recording {
     }
 
     pub fn events(&self) -> impl Iterator<Item = EventRef<'_>> {
-        self.entries.iter().map(|entry| EventRef {
-            kind: entry.kind,
-            timestamp: entry.timestamp,
-            win: &self.tabs[entry.tab as usize],
-            tab: entry.tab,
-            data: match entry.data {
-                Data::Null => "null",
-                Data::Span { start, end } => &self.text[start..end],
-            },
-            compressed: entry.compressed,
-        })
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| EventRef {
+                kind: entry.kind,
+                timestamp: entry.timestamp,
+                win: &self.tabs[entry.tab as usize],
+                tab: entry.tab,
+                data: match entry.data {
+                    Data::Null | Data::MinimalScreenshot => "null",
+                    Data::Span { start, end } => &self.text[start..end],
+                },
+                compressed: entry.compressed,
+                mobile_context: self
+                    .mobile_contexts
+                    .as_ref()
+                    .map_or(mobile::Context::default(), |contexts| contexts[index]),
+                synthetic_full: matches!(entry.data, Data::MinimalScreenshot),
+            })
     }
 
     /// Unpack a posthog-js packed string: compressed bytes, one per UTF-16 unit.
@@ -514,14 +548,31 @@ impl Recording {
                 }
             }
             META => match small()["href"].as_str() {
-                Some(href) => Reading::Signal(Signal::Meta {
-                    href: href.to_owned(),
-                }),
-                None => Reading::Malformed("meta".into()),
+                Some(href) if !href.is_empty() || !event.mobile_context.mobile => {
+                    Reading::Signal(Signal::Meta {
+                        href: href.to_owned(),
+                    })
+                }
+                _ if event.mobile_context.mobile => {
+                    Reading::Uninterpreted("mobile_meta_without_screen".into())
+                }
+                _ => Reading::Malformed("meta".into()),
             },
             CUSTOM => {
                 let mut value = small();
                 match value["tag"].as_str().map(str::to_owned) {
+                    Some(tag) if tag == "keyboard" && event.mobile_context.mobile => {
+                        let mut ids = self.mobile_ids.borrow_mut();
+                        match mobile::keyboard(
+                            &value,
+                            event.mobile_context,
+                            &mut ids[event.tab as usize],
+                            &self.mobile_reserved[event.tab as usize],
+                        ) {
+                            Some(mutation) => Reading::Signal(Signal::Mutation(mutation)),
+                            None => Reading::Malformed("keyboard".into()),
+                        }
+                    }
                     Some(tag) => Reading::Signal(Signal::Custom {
                         tag,
                         payload: value["payload"].take(),
@@ -546,6 +597,12 @@ impl Recording {
     }
 
     fn read_full_snapshot(&self, event: &EventRef<'_>) -> Result<Reading> {
+        if event.synthetic_full {
+            self.mobile_ids.borrow_mut()[event.tab as usize] = 100;
+            return Ok(Reading::Signal(Signal::FullSnapshot(
+                mobile::empty_document(),
+            )));
+        }
         #[derive(Deserialize)]
         struct Shape<'a> {
             #[serde(borrow, default)]
@@ -571,6 +628,20 @@ impl Recording {
             }
             _ => event.data,
         };
+        if event.mobile_context.mobile && json.contains("\"wireframes\"") {
+            let mut ids = self.mobile_ids.borrow_mut();
+            return Ok(
+                match mobile::full(
+                    json,
+                    event.mobile_context,
+                    &mut ids[event.tab as usize],
+                    &self.mobile_reserved[event.tab as usize],
+                ) {
+                    Some(node) => Reading::Signal(Signal::NativeFullSnapshot(node)),
+                    None => Reading::Malformed("full_snapshot".into()),
+                },
+            );
+        }
         // A snapshot without a node object has no page to mirror.
         let node_is_object = is_object(json)
             && parse_borrowed::<Shape<'_>>(json)
@@ -581,7 +652,12 @@ impl Recording {
             return Ok(Reading::Malformed("full_snapshot".into()));
         }
         Ok(match parse_deep::<FullSnapshot>(json.as_bytes()) {
-            Ok(snapshot) => Reading::Signal(Signal::FullSnapshot(snapshot.node)),
+            Ok(mut snapshot) => {
+                if event.mobile_context.mobile && mobile::screenshot_attribute_key(json) {
+                    mobile::ensure_chrome_parents(&mut snapshot.node);
+                }
+                Reading::Signal(Signal::FullSnapshot(snapshot.node))
+            }
             Err(_) => Reading::Malformed("full_snapshot".into()),
         })
     }
@@ -590,12 +666,40 @@ impl Recording {
         if !is_object(event.data) {
             return Ok(Reading::Malformed("mutation".into()));
         }
+        if event.mobile_context.mobile && mobile::has_wireframe_mutation(event.data) {
+            let mut ids = self.mobile_ids.borrow_mut();
+            return Ok(
+                match mobile::mutation(
+                    event.data,
+                    event.mobile_context,
+                    &mut ids[event.tab as usize],
+                    &self.mobile_reserved[event.tab as usize],
+                ) {
+                    Some(mutation) => Reading::Signal(Signal::Mutation(mutation)),
+                    None => Reading::Malformed("mutation".into()),
+                },
+            );
+        }
         let Ok(data) = parse_deep::<MutationData>(event.data.as_bytes()) else {
             return Ok(Reading::Malformed("mutation".into()));
         };
         Ok(
             match data.resolve(event.compressed, |packed| self.unpack(packed)) {
-                Ok(Some(mutation)) => Reading::Signal(Signal::Mutation(mutation)),
+                Ok(Some(mut mutation)) => {
+                    if event.mobile_context.mobile {
+                        for add in &mut mutation.adds {
+                            if add.parent == 0
+                                && add.node.tag == "img"
+                                && add.node.attributes.0.iter().any(|(name, value)| {
+                                    name == "data-posthog-screenshot" && !value.is_null()
+                                })
+                            {
+                                add.parent = mobile::BODY_ID;
+                            }
+                        }
+                    }
+                    Reading::Signal(Signal::Mutation(mutation))
+                }
                 Err(error @ DecodeError::TooLarge { .. }) => return Err(error),
                 Ok(None) | Err(_) => Reading::Malformed("mutation".into()),
             },
@@ -644,6 +748,9 @@ impl Recording {
     }
 
     fn expand_data(&self, event: &EventRef<'_>) -> Result<String> {
+        if event.synthetic_full {
+            return Ok(mobile::minimal_full_json());
+        }
         if !event.compressed {
             return Ok(event.data.to_owned());
         }

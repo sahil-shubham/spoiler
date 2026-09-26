@@ -1,0 +1,86 @@
+{
+ "description": "A screenshot incremental is the first visual event, before any full snapshot.",
+ "app": "mobile",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 1756000000000,
+   "data": {
+    "href": "GalleryScreen",
+    "width": 390,
+    "height": 844
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000000020,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 0,
+      "wireframe": {
+       "id": 10000001,
+       "type": "screenshot",
+       "x": 0,
+       "y": 0,
+       "width": 390,
+       "height": 844,
+       "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP48OHDfwAJdAPQXHvArAAAAABJRU5ErkJggg=="
+      }
+     }
+    ]
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001000,
+   "data": {
+    "source": 2,
+    "id": 0,
+    "pointerType": 2,
+    "x": 180,
+    "y": 350,
+    "type": 7
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001050,
+   "data": {
+    "source": 2,
+    "id": 0,
+    "pointerType": 2,
+    "x": 180,
+    "y": 350,
+    "type": 9
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001260,
+   "data": {
+    "source": 0,
+    "updates": [
+     {
+      "parentId": 0,
+      "wireframe": {
+       "id": 10000001,
+       "type": "screenshot",
+       "x": 0,
+       "y": 0,
+       "width": 390,
+       "height": 844,
+       "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQW9D2HwAESAI8ysscbwAAAABJRU5ErkJggg=="
+      }
+     }
+    ]
+   },
+   "win": "w1"
+  }
+ ]
+}

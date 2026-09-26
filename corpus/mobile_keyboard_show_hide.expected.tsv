@@ -1,0 +1,4 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	mobile.editor	EditorScreen				
+e2	1.1	w1	click	mobile.editor	input		120ms	+text "keyboard"	
+e3	2.0	w1	click	mobile.editor	button "Done"		120ms	-text "keyboard"	

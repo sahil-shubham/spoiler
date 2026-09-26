@@ -46,19 +46,37 @@ struct ClosedGesture {
 
 const MAX_CLOSED_GESTURES: usize = 32;
 
+/// The control and coordinates at touch-down. Native events usually name a pointer id rather
+/// than a DOM node; keep the hit before a touch-down response changes the mirror.
+pub(super) struct PendingTouch {
+    pub(super) pointer: NodeId,
+    pub(super) at: Timestamp,
+    pub(super) point: super::super::Point,
+    pub(super) control: Control,
+    pub(super) class: TargetClass,
+    pub(super) path: Option<String>,
+    pub(super) surface: Option<String>,
+}
+
 /// Per-tab state. Tabs have separate DOMs, locations and effect windows.
 pub(super) struct Tab {
     pub(super) number: usize,
     pub(super) mirror: Mirror,
     pub(super) mounted_at: HashMap<NodeId, Timestamp>,
+    pub(super) root: Option<NodeId>,
+    pub(super) mobile_snapshot: bool,
+    /// Whether the last full snapshot came from native wireframes (not web rrweb DOM).
+    pub(super) native_full_snapshot: bool,
+    pub(super) mobile_semantics_seen: bool,
     pub(super) location: Option<String>,
     /// The vocabulary surface `location` is on.
-    surface: Option<String>,
+    pub(super) surface: Option<String>,
     pub(super) navigations: Vec<(String, Timestamp)>,
     pub(super) gesture: Option<Gesture>,
     pub(super) typing: Option<Typing>,
     pub(super) hidden: bool,
     pub(super) pending_double: Option<(NodeId, Timestamp)>,
+    pub(super) pending_touch: Option<PendingTouch>,
     closed_gestures: VecDeque<ClosedGesture>,
     pub(super) selection: Option<String>,
     /// Incremented per gesture opened, to tell whether a gesture is still the one typing opened.
@@ -85,6 +103,10 @@ impl Tab {
             number,
             mirror: Mirror::default(),
             mounted_at: HashMap::default(),
+            root: None,
+            mobile_snapshot: false,
+            mobile_semantics_seen: false,
+            native_full_snapshot: false,
             location: None,
             surface: None,
             navigations: Vec::new(),
@@ -93,6 +115,7 @@ impl Tab {
             typing: None,
             hidden: false,
             pending_double: None,
+            pending_touch: None,
             closed_gestures: VecDeque::new(),
             gesture_serial: 0,
         }
@@ -299,7 +322,29 @@ impl Tab {
         context: &Context<'_>,
         id: NodeId,
     ) -> (Control, Option<TargetClass>) {
-        let resolution = target::resolve(
+        self.control_with_text(context, id, false)
+    }
+
+    pub(super) fn mobile_control(
+        &self,
+        context: &Context<'_>,
+        id: NodeId,
+    ) -> (Control, Option<TargetClass>) {
+        self.control_with_text(context, id, true)
+    }
+
+    fn control_with_text(
+        &self,
+        context: &Context<'_>,
+        id: NodeId,
+        mobile: bool,
+    ) -> (Control, Option<TargetClass>) {
+        let resolve = if mobile {
+            target::resolve_mobile
+        } else {
+            target::resolve
+        };
+        let resolution = resolve(
             &self.mirror,
             context.matcher,
             &context.grid,

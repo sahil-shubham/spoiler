@@ -109,6 +109,11 @@ pub fn compile(
     for tab in compiler.tabs.values_mut() {
         tab.close_gesture(&mut compiler.actions, compiler.context.t0);
     }
+    compiler.coverage.screenshot_only = compiler
+        .coverage
+        .opaque_mounts
+        .contains_key("mobile_screenshot")
+        && !compiler.tabs.values().any(|tab| tab.mobile_semantics_seen);
     Ok(Compilation {
         actions: finalize(
             compiler.actions,
@@ -142,8 +147,9 @@ impl Coverage {
         Self::count(&mut self.extensions, name);
     }
 
-    /// Survey mounted content the trace cannot see into, skipping extension-owned subtrees.
-    fn survey(&mut self, root: &SerializedNode, under_extension: bool) {
+    /// Survey opaque content and whether this mounted subtree carries native mobile markers.
+    fn survey(&mut self, root: &SerializedNode, under_extension: bool) -> bool {
+        let mut mobile = false;
         let mut stack = vec![(root, under_extension)];
         while let Some((node, inherited)) = stack.pop() {
             if let Some(extension) = serialized_extension(node) {
@@ -154,6 +160,26 @@ impl Coverage {
             }
             if inherited {
                 continue;
+            }
+            if node
+                .attributes
+                .0
+                .iter()
+                .any(|(key, _)| key == "data-spoiler-mobile-x")
+            {
+                mobile = true;
+            }
+            if node
+                .attributes
+                .0
+                .iter()
+                .any(|(key, _)| key == "data-posthog-screenshot")
+            {
+                mobile = true;
+                *self
+                    .opaque_mounts
+                    .entry("mobile_screenshot".to_owned())
+                    .or_default() += 1;
             }
             let opaque = match node.tag.as_str() {
                 "iframe" | "frame" => Some("iframe"),
@@ -172,6 +198,7 @@ impl Coverage {
             }
             stack.extend(node.children.iter().map(|child| (child, false)));
         }
+        mobile
     }
 }
 
@@ -230,8 +257,9 @@ impl Compiler<'_> {
             Reading::Uninterpreted(name) => return coverage.uninterpreted(&name),
             Reading::Malformed(name) => return Coverage::count(&mut coverage.malformed, &name),
         };
+        let native_full = matches!(signal, Signal::NativeFullSnapshot(_));
         match signal {
-            Signal::FullSnapshot(root) => {
+            Signal::FullSnapshot(root) | Signal::NativeFullSnapshot(root) => {
                 if tab.location.is_none() {
                     let known = hrefs.get(event.win).and_then(|urls| {
                         urls.iter()
@@ -244,7 +272,11 @@ impl Compiler<'_> {
                         coverage.unlocated_snapshots += 1;
                     }
                 }
-                on_full_snapshot(tab, coverage, root, at);
+                if native_full {
+                    on_native_full_snapshot(tab, coverage, root, at);
+                } else {
+                    on_full_snapshot(tab, coverage, root, at);
+                }
             }
             Signal::Meta { href } => tab.navigate(context, &href, at, actions),
             Signal::Mutation(mutation) => on_mutation(tab, coverage, mutation, at),

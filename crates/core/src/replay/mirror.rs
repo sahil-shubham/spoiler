@@ -264,16 +264,18 @@ impl Mirror {
             removes,
             texts,
             attributes,
+            replacements,
         } = mutation;
         if !removes.is_empty() {
-            // An add with an existing id is a move. Keep its subtree even when the old parent
-            // (or the moved node itself) is removed earlier in this batch.
+            // Native updates replace the old subtree; web remove+add is a move preserving it.
             let moved: HashSet<_> = adds.iter().map(|add| add.node.id).collect();
             for id in &moved {
-                self.detach(*id);
+                if !replacements.contains(id) {
+                    self.detach(*id);
+                }
             }
             for remove in removes {
-                if !moved.contains(&remove.id) {
+                if !moved.contains(&remove.id) || replacements.contains(&remove.id) {
                     self.remove(remove.id);
                 }
             }

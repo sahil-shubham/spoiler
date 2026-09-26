@@ -44,10 +44,17 @@ pub struct Coverage {
     /// Full snapshots on tabs without any location or pageview URL to borrow.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub unlocated_snapshots: usize,
+    /// Screenshot content was recorded, but no labelled native wireframe content was captured.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub screenshot_only: bool,
 }
 
 fn is_zero(count: &usize) -> bool {
     *count == 0
+}
+
+fn is_false(flag: &bool) -> bool {
+    !flag
 }
 
 /// Version of the compilation rules. Traces from other versions are not comparable.

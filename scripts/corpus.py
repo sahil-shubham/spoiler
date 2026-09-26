@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the synthetic corpus: one small recording per compiler rule.
+"""Generate small synthetic web and native-mobile PostHog replay recordings.
 
-Each case is written to corpus/<name>.json as plain rrweb events (decoded, one tab per `win`),
-with a description of the rule it pins down. Goldens (corpus/<name>.expected.*) are produced by
-`SPOILER_BLESS=1 cargo test --test corpus` and reviewed as diffs. Run this after editing cases.
+Each case is written to corpus/<name>.json with a description. Goldens
+(corpus/<name>.expected.*) are produced by `SPOILER_BLESS=1 cargo test --test corpus`
+and reviewed as diffs. Run this after editing cases.
 """
 import json
 import pathlib
@@ -11,6 +11,10 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CORPUS = ROOT / "corpus"
 HOST = "https://demo.test"
+MOBILE_EPOCH_MS = 1_756_000_000_000
+# Two real 1x1 RGBA PNGs, scaled by the screenshot wireframe, not captured app pixels.
+SCREENSHOT_BEFORE = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP48OHDfwAJdAPQXHvArAAAAABJRU5ErkJggg=="
+SCREENSHOT_AFTER = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQW9D2HwAESAI8ysscbwAAAABJRU5ErkJggg=="
 
 
 class Rec:
@@ -101,6 +105,59 @@ class Rec:
         self.push(t, 3, {"source": 1, "positions": [{"x": 1, "y": 1, "id": 1, "timeOffset": 0}]}, win)
 
 
+# Native SDK event shapes (Meta/full snapshot, touch, mutation and keyboard):
+# https://github.com/PostHog/posthog-ios/blob/main/PostHog/Replay/PostHogReplayIntegration.swift#L800-L843
+# https://github.com/PostHog/posthog-ios/blob/main/PostHog/Replay/PostHogReplayIntegration.swift#L662-L733
+# https://github.com/PostHog/posthog-android/blob/main/posthog-android/src/main/java/com/posthog/android/replay/PostHogReplayIntegration.kt#L841-L919
+# https://github.com/PostHog/posthog-android/blob/main/posthog-android/src/main/java/com/posthog/android/replay/PostHogReplayIntegration.kt#L456-L530
+# https://github.com/PostHog/posthog/blob/master/common/replay-shared/src/mobile/mobile.types.ts#L149-L273
+# https://github.com/PostHog/posthog/blob/master/frontend/src/scenes/session-recordings/mobile-replay/transform.test.ts#L85-L151
+# https://github.com/PostHog/posthog/blob/master/frontend/src/scenes/session-recordings/mobile-replay/transform.test.ts#L873-L959
+class MobileRec(Rec):
+    """Emit raw native replay events; never wrap mobile wireframes in rrweb DOM nodes."""
+
+    def __init__(self):
+        super().__init__()
+        # PostHog's web transformer reserves ids below 10,000,000 for synthetic nodes.
+        self._id = 10_000_000
+
+    def push(self, t, kind, data, win="w1"):
+        super().push(MOBILE_EPOCH_MS + t, kind, data, win)
+
+    def wireframe(self, kind, x, y, width, height, **fields):
+        # SDK coordinates are absolute screen coordinates, including nested children.
+        return {"id": self.id(), "type": kind, "x": x, "y": y,
+                "width": width, "height": height, **fields}
+
+    def meta(self, t, screen, width=390, height=844):
+        self.push(t, 4, {"href": screen, "width": width, "height": height})
+
+    def screen(self, t, screen, *wireframes):
+        self.meta(t, screen)
+        self.push(t, 2, {"wireframes": list(wireframes), "initialOffset": {"top": 0, "left": 0}})
+
+    def touch(self, t, x, y):
+        data = {"source": 2, "id": 0, "pointerType": 2, "x": x, "y": y}
+        self.push(t, 3, {**data, "type": 7})  # TouchStart
+        self.push(t + 50, 3, {**data, "type": 9})  # TouchEnd
+
+    def mutation(self, t, adds=(), updates=(), removes=()):
+        data = {"source": 0}
+        if adds:
+            data["adds"] = list(adds)
+        if updates:
+            data["updates"] = list(updates)
+        if removes:
+            data["removes"] = list(removes)
+        self.push(t, 3, data)
+
+    def keyboard(self, t, open_, height=None):
+        payload = {"open": open_}
+        if open_:
+            payload["height"] = height
+        self.custom(t, "keyboard", payload)
+
+
 def button(r, label, **attrs):
     return r.el("button", attrs, r.text(label))
 
@@ -119,9 +176,9 @@ def grid(r, rows, keyed=True):
 CASES = {}
 
 
-def case(description):
+def case(description, app="demo"):
     def register(build):
-        CASES[build.__name__] = (description, build)
+        CASES[build.__name__] = (description, build, app)
         return build
     return register
 
@@ -621,13 +678,108 @@ def extension_child_is_not_a_product_label(r):
     r.press(1000, save)
 
 
+@case("A native iOS tap on Save changes the button's own label from Save to Saved.", app="mobile")
+def mobile_ios_button_text_effect(r):
+    save = r.wireframe("input", 24, 136, 124, 48, inputType="button", disabled=False, value="Save")
+    root = r.wireframe("div", 0, 0, 390, 844, childWireframes=[
+        r.wireframe("text", 24, 72, 250, 32, text="Draft"), save,
+    ])
+    r.screen(0, "HomeScreen", root)
+    r.touch(1000, 80, 160)
+    # iOS emits a new full wireframe frame for the tap response, not Android-style updates.
+    r.push(1230, 2, {"wireframes": [{**root, "childWireframes": [
+        root["childWireframes"][0], {**save, "value": "Saved"},
+    ]}], "initialOffset": {"top": 0, "left": 0}})
+
+
+@case("A native tap on read-only text makes no visible change and is dead.", app="mobile")
+def mobile_inert_dead_tap(r):
+    note = r.wireframe("text", 24, 176, 260, 36, text="Read-only tip")
+    root = r.wireframe("div", 0, 0, 390, 844, childWireframes=[note])
+    r.screen(0, "HomeScreen", root)
+    r.touch(1000, 90, 194)
+
+
+@case("A native screen-name Meta after a Settings tap resolves to the Settings mobile surface.", app="mobile")
+def mobile_meta_screen_change(r):
+    settings = r.wireframe("input", 240, 40, 125, 48,
+                           inputType="button", disabled=False, value="Settings")
+    home = r.wireframe("div", 0, 0, 390, 844, childWireframes=[settings])
+    r.screen(0, "HomeScreen", home)
+    r.touch(1000, 290, 64)
+    heading = r.wireframe("text", 24, 80, 210, 42, text="Settings")
+    r.screen(1360, "SettingsScreen",
+             r.wireframe("div", 0, 0, 390, 844, childWireframes=[heading]))
+
+
+@case("An Android Publish tap updates a label and removes its draft hint in one mutation.", app="mobile")
+def mobile_android_update_remove(r):
+    status = r.wireframe("text", 24, 80, 270, 36, text="Draft")
+    hint = r.wireframe("text", 24, 240, 300, 32, text="Tap Publish to send")
+    publish = r.wireframe("input", 24, 160, 140, 48,
+                          inputType="button", disabled=False, value="Publish")
+    root = r.wireframe("div", 0, 0, 390, 844, childWireframes=[status, publish, hint])
+    r.screen(0, "EditorScreen", root)
+    r.touch(1000, 80, 184)
+    r.mutation(1220, updates=[{"parentId": root["id"],
+                               "wireframe": {**status, "text": "Published"}}],
+               removes=[{"parentId": root["id"], "id": hint["id"]}])
+
+
+@case("An Android checkbox update records the checked state as the tap's visible effect.", app="mobile")
+def mobile_android_checked_state(r):
+    checkbox = r.wireframe("input", 24, 160, 180, 48, inputType="checkbox",
+                           disabled=False, checked=False, label="Notifications")
+    root = r.wireframe("div", 0, 0, 390, 844, childWireframes=[checkbox])
+    r.screen(0, "EditorScreen", root)
+    r.touch(1000, 72, 180)
+    r.mutation(1200, updates=[{"parentId": root["id"],
+                               "wireframe": {**checkbox, "checked": True}}])
+
+
+@case("Tapping a native text field shows the keyboard; tapping Done hides it.", app="mobile")
+def mobile_keyboard_show_hide(r):
+    field = r.wireframe("input", 24, 80, 280, 48,
+                        inputType="text", disabled=False, value="")
+    done = r.wireframe("input", 316, 80, 62, 48,
+                       inputType="button", disabled=False, value="Done")
+    root = r.wireframe("div", 0, 0, 390, 844, childWireframes=[field, done])
+    r.screen(0, "EditorScreen", root)
+    r.touch(1000, 80, 102)
+    r.keyboard(1170, True, height=290)
+    r.touch(2000, 340, 102)
+    r.keyboard(2170, False)
+
+
+@case("A screenshot-mode native tap is followed by a changed screenshot wireframe.", app="mobile")
+def mobile_screenshot_tap(r):
+    image = r.wireframe("screenshot", 0, 0, 390, 844, base64=SCREENSHOT_BEFORE)
+    r.screen(0, "GalleryScreen", image)
+    r.touch(1000, 180, 350)
+    r.mutation(1260, updates=[{"parentId": 0,
+                               "wireframe": {**image, "base64": SCREENSHOT_AFTER}}])
+
+
+@case("A screenshot incremental is the first visual event, before any full snapshot.", app="mobile")
+def mobile_screenshot_first_incremental(r):
+    image = r.wireframe("screenshot", 0, 0, 390, 844, base64=SCREENSHOT_BEFORE)
+    r.meta(0, "GalleryScreen")
+    r.mutation(20, adds=[{"parentId": 0, "wireframe": image}])
+    r.touch(1000, 180, 350)
+    r.mutation(1260, updates=[{"parentId": 0,
+                               "wireframe": {**image, "base64": SCREENSHOT_AFTER}}])
+
+
 def main():
     CORPUS.mkdir(exist_ok=True)
-    for name, (description, build) in CASES.items():
-        r = Rec()
+    for name, (description, build, app) in CASES.items():
+        r = MobileRec() if app == "mobile" else Rec()
         build(r)
-        document = {"description": description, "app": "demo", "events": r.events}
-        (CORPUS / f"{name}.json").write_text(json.dumps(document, indent=1) + "\n")
+        document = {"description": description, "app": app, "events": r.events}
+        path = CORPUS / f"{name}.json"
+        content = json.dumps(document, indent=1) + "\n"
+        if not path.exists() or path.read_text() != content:
+            path.write_text(content)
     print(f"wrote {len(CASES)} cases to {CORPUS}")
 
 

@@ -4,14 +4,73 @@ use super::scan::*;
 use super::*;
 use crate::time::Timestamp;
 use crate::{
-    recording::rrweb::{Added, AttrValue, Mutation, NodeId},
+    recording::rrweb::{
+        Added, AttrValue, AttributeChange, Attributes, Mutation, NodeId, Remove, SerializedNode,
+        TextChange,
+    },
     replay::{
-        Mirror,
+        Mirror, Node, NodeKind,
         grid::{row_of, row_snapshot, rows_in},
         is_non_visual,
     },
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+
+/// Raw native full frames have stable wireframe ids, unlike web full snapshots. Screenshot
+/// pixels have no semantic representation; an image-only frame is never a DOM reaction.
+fn labelled_wireframe(root: &SerializedNode) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let attr = |name: &str| {
+            node.attributes
+                .0
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value)
+        };
+        if attr("data-spoiler-mobile-chrome").is_some() || attr("data-posthog-screenshot").is_some()
+        {
+            continue;
+        }
+        if attr("data-spoiler-mobile-x").is_some()
+            && (node
+                .children
+                .iter()
+                .any(|child| child.kind == 3 && !child.text.trim().is_empty())
+                || ["aria-label", "title", "placeholder", "alt", "value"]
+                    .iter()
+                    .any(|name| {
+                        attr(name)
+                            .is_some_and(|value| value.as_str().is_some_and(|v| !v.is_empty()))
+                    }))
+        {
+            return true;
+        }
+        stack.extend(&node.children);
+    }
+    false
+}
+
+fn same_native_node(old: &Node, new: &SerializedNode, parent: Option<NodeId>) -> bool {
+    old.parent == parent
+        && old.tag == new.tag
+        && old.kind
+            == match new.kind {
+                0 => NodeKind::Document,
+                2 => NodeKind::Element,
+                3 => NodeKind::Text,
+                _ => NodeKind::Other,
+            }
+}
+
+fn screenshot_or_chrome(attributes: &[(String, AttrValue)]) -> bool {
+    attributes.iter().any(|(name, _)| {
+        matches!(
+            name.as_str(),
+            "data-posthog-screenshot" | "data-spoiler-mobile-chrome"
+        )
+    })
+}
 
 impl GestureWindow {
     /// Before a mutation batch applies: what it removes, and the prior value of what it changes.
@@ -20,6 +79,106 @@ impl GestureWindow {
         self.capture_removals(mirror, mutation, at);
         self.capture_text_changes(mirror, mutation, at);
         self.capture_attribute_changes(mirror, mutation, at);
+    }
+    /// Express a native full-frame replacement as the changes the window already knows how
+    /// to net: edits to stable ids and subtree removals/additions at stable attach points.
+    /// The caller resets the mirror and passes the returned mounts to `after_batch`.
+    pub(crate) fn before_native_full(
+        &mut self,
+        mirror: &Mirror,
+        root: &SerializedNode,
+        at: Timestamp,
+    ) -> Vec<Added> {
+        if !crate::trace::target::mobile_has_labels(mirror, root.id) && !labelled_wireframe(root) {
+            return Vec::new();
+        }
+        let Some(old_root) = mirror.get(root.id) else {
+            return Vec::new();
+        };
+        if !same_native_node(old_root, root, None) {
+            return Vec::new();
+        }
+
+        let mut future = HashMap::default();
+        let mut stack = vec![(root, None)];
+        while let Some((node, parent)) = stack.pop() {
+            future.insert(node.id, (node, parent));
+            stack.extend(node.children.iter().map(|child| (child, Some(node.id))));
+        }
+        let mut mutation = Mutation::default();
+        let mut stack = vec![old_root];
+        while let Some(old) = stack.pop() {
+            if screenshot_or_chrome(&old.attributes) {
+                continue;
+            }
+            let matching = future
+                .get(&old.id)
+                .filter(|(node, parent)| same_native_node(old, node, *parent));
+            let Some((new, _)) = matching else {
+                if let Some(parent) = old.parent {
+                    mutation.removes.push(Remove { parent, id: old.id });
+                }
+                continue;
+            };
+            if old.text != new.text {
+                mutation.texts.push(TextChange {
+                    id: old.id,
+                    value: new.text.clone(),
+                });
+            }
+            let mut changed = Attributes::default();
+            for (name, before) in &old.attributes {
+                if !(is_state_attribute(name) || name == "class") {
+                    continue;
+                }
+                let after = new.attributes.0.iter().find(|(key, _)| key == name);
+                if after.map(|(_, value)| value) != Some(before) {
+                    changed.0.push((
+                        name.clone(),
+                        after.map_or(AttrValue::Json(serde_json::Value::Null), |(_, value)| {
+                            value.clone()
+                        }),
+                    ));
+                }
+            }
+            for (name, after) in &new.attributes.0 {
+                if (is_state_attribute(name) || name == "class")
+                    && !old.attributes.iter().any(|(key, _)| key == name)
+                {
+                    changed.0.push((name.clone(), after.clone()));
+                }
+            }
+            if !changed.0.is_empty() {
+                mutation.attributes.push(AttributeChange {
+                    id: old.id,
+                    attributes: changed,
+                });
+            }
+            stack.extend(old.children.iter().filter_map(|id| mirror.get(*id)));
+        }
+
+        let mut added = Vec::new();
+        let mut stack = vec![(root, None)];
+        while let Some((node, parent)) = stack.pop() {
+            if screenshot_or_chrome(&node.attributes.0) {
+                continue;
+            }
+            if !mirror
+                .get(node.id)
+                .is_some_and(|old| same_native_node(old, node, parent))
+            {
+                if let Some(parent) = parent {
+                    added.push(Added {
+                        parent,
+                        id: node.id,
+                    });
+                }
+                continue;
+            }
+            stack.extend(node.children.iter().map(|child| (child, Some(node.id))));
+        }
+        self.before_batch(mirror, &mutation, at);
+        added
     }
 
     /// Rows the batch touches, with their cells before it (on first touch). A cell replaced

@@ -1,6 +1,6 @@
 # Spoiler
 
-Spoiler turns PostHog/rrweb session recordings into evidence you can inspect: it decodes recording data, replays a per-tab DOM mirror, compiles user actions and visible effects into a deterministic trace with friction signals, and prepares or validates LLM narration through OpenRouter. A pinned product vocabulary supplies names and matching rules, so the same recording and vocabulary produce the same trace. The Rust core has no HTTP, database, or clock dependency; the CLI handles files and network access.
+Spoiler turns PostHog/rrweb session recordings into evidence you can inspect: it decodes recording data, replays browser DOM or native mobile wireframes, compiles user actions and visible effects into a deterministic trace with friction signals, and prepares or validates LLM narration through OpenRouter. A pinned product vocabulary supplies names and matching rules, so the same recording and vocabulary produce the same trace. The Rust core has no HTTP, database, or clock dependency; the CLI handles files and network access.
 
 ## Install
 
@@ -75,6 +75,18 @@ On a 429, fetch waits for `Retry-After` and retries only that request while the 
 
 Discovery binds window and cursor values in a named HogQL query. It bounds metadata aggregation to segments within 24 hours of the window, and checks session IDs up to seven days outside it: some live IDs exceed PostHog's documented 24-hour cutoff. Recordings with segments farther than seven days outside the window can still appear complete incorrectly. It lists non-deleted recordings that started at least 24 hours ago and ended by `--until` within those bounds. Rows include `snapshot_source`, `snapshot_library`, and `retention_period_days` for capture-type and expiry decisions. PostHog's ad-hoc `/query` endpoint has rate and byte-read budgets; budget 429s are retryable, and callers should honor the reported `Retry-After`.
 
+## Native mobile recordings
+
+`spoiler compile` reads PostHog native iOS and Android events: screen-name Meta (`type: 4`), wireframe full snapshots (`type: 2`, `wireframes` and `initialOffset`), Android wireframe add/update/remove mutations, TouchStart/TouchEnd coordinates, and keyboard show/hide events. iOS can send a new full wireframe snapshot for **every frame**, including an action's visible response; these frames are compared for effects. Screenshot-mode frames use `type: screenshot` wireframes instead of an inspectable view tree. Flutter and React Native record screenshot-only replays upstream; when their snapshots use this mobile event format, the same screenshot limits apply. Supply the mobile app id, not the demo web app id:
+
+```sh
+python3 scripts/corpus.py
+spoiler compile --recording corpus/mobile_ios_button_text_effect.json \
+  --vocab corpus/vocabulary.yaml --app mobile --out mobile-trace.json
+```
+
+For native screens, Meta `href` is a screen name such as `SettingsScreen`, **not** necessarily an HTTP URL. Define its vocabulary `route` as that exact screen name (case-sensitive, with no invented leading slash); `--app` selects which app's surfaces may match. Browser URL paths still use ordinary path routes such as `/page`. Native touch coordinates are absolute within the recorded viewport; a wireframe hit can name a target, whereas screenshot pixels cannot be OCR'd into controls or text. A screenshot-only tap is reported as `screen (x,y)` with no invented button or pixel-change effect. Screenshot frame mounts are counted under `coverage.opaque_mounts.mobile_screenshot`; `coverage.screenshot_only` indicates that no labelled wireframe was available. Keyboard events report visibility, not typed characters. Check trace `coverage` for uninterpreted or malformed events before relying on a narration.
+
 ## Vocabulary and prompts
 
 A vocabulary names apps, surfaces, and features, and may specify grid identities, telemetry URL fragments, error-message patterns, and timing thresholds. The corpus vocabulary is a minimal example. An optional grid configuration might look like:
@@ -130,4 +142,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributions and [SECURITY.md](SECUR
 
 ## Limitations
 
-The DOM mirror cannot see iframe documents, canvas pixels, shadow-root internals, or arbitrary unrecognized rrweb plugins; inspect `coverage` when judging a trace. Live PostHog query/pagination behavior and model answer quality are not covered by automated tests. Avoid committing actual session recordings or credentials.
+The browser DOM mirror cannot see iframe documents, canvas pixels, shadow-root internals, or arbitrary unrecognized rrweb plugins. Native wireframes contain only what the SDK captured; screenshots are opaque images, not reconstructible view hierarchies, and touch coordinates do not establish which control a user intended when the target is absent. Inspect `coverage` when judging a trace. Live PostHog query/pagination behavior and model answer quality are not covered by automated tests. Avoid committing actual session recordings or credentials.

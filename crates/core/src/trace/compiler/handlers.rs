@@ -2,12 +2,12 @@
 
 use super::{
     Context,
-    tab::{Attribution, Tab, Typing},
+    tab::{Attribution, PendingTouch, Tab, Typing},
 };
 use crate::replay::{extension_request_url, extension_url};
 use crate::time::{Millis, Timestamp};
 use crate::trace::{
-    Action, Coverage, Detail, Entry, Point, Press, TargetClass,
+    Action, Control, Coverage, Detail, Entry, Point, Press, TargetClass,
     effect::{Change, Effect},
 };
 use crate::{
@@ -48,9 +48,49 @@ pub(super) fn on_full_snapshot(
     {
         gesture.window.flush(&tab.mirror);
     }
+    replace_snapshot(tab, coverage, root, at);
+    tab.native_full_snapshot = false;
+}
+
+/// Native wireframe fulls are successive frames of the same screen. Unlike a web full
+/// snapshot, changes between frames belong to the open gesture's effect window.
+pub(super) fn on_native_full_snapshot(
+    tab: &mut Tab,
+    coverage: &mut Coverage,
+    root: SerializedNode,
+    at: Timestamp,
+) {
+    if !tab.native_full_snapshot {
+        on_full_snapshot(tab, coverage, root, at);
+        tab.native_full_snapshot = true;
+        return;
+    }
+    let added = if !tab.hidden {
+        tab.gesture
+            .as_mut()
+            .filter(|gesture| gesture.window.is_collecting(at))
+            .map(|gesture| gesture.window.before_native_full(&tab.mirror, &root, at))
+    } else {
+        None
+    };
+    replace_snapshot(tab, coverage, root, at);
+    if let Some(added) = added
+        && let Some(gesture) = tab.gesture.as_mut()
+    {
+        gesture.window.after_batch(&tab.mirror, &added, at);
+    }
+}
+
+fn replace_snapshot(tab: &mut Tab, coverage: &mut Coverage, root: SerializedNode, at: Timestamp) {
+    tab.root = Some(root.id);
     tab.mark_mounted(&root, at);
-    coverage.survey(&root, false);
+    tab.mobile_snapshot = coverage.survey(&root, false);
     tab.mirror.reset(root);
+    if tab.mobile_snapshot && !tab.mobile_semantics_seen {
+        tab.mobile_semantics_seen = tab
+            .root
+            .is_some_and(|root| crate::trace::target::mobile_has_labels(&tab.mirror, root));
+    }
 }
 
 pub(super) fn on_mutation(
@@ -59,9 +99,10 @@ pub(super) fn on_mutation(
     mutation: Mutation,
     at: Timestamp,
 ) {
+    let mut mobile_added = false;
     for add in &mutation.adds {
         tab.mark_mounted(&add.node, at);
-        coverage.survey(&add.node, tab.mirror.extension(add.parent).is_some());
+        mobile_added |= coverage.survey(&add.node, tab.mirror.extension(add.parent).is_some());
     }
     // Attributes and style text can turn an already-mounted node into extension content.
     let mut newly_marked = Vec::new();
@@ -70,13 +111,33 @@ pub(super) fn on_mutation(
             newly_marked.push(id);
         }
     };
+    let mut mobile_attributes = false;
     for change in &mutation.attributes {
-        if change.attributes.0.iter().any(|(name, _)| {
-            matches!(
+        let mut extension_attributes = false;
+        for (name, value) in &change.attributes.0 {
+            extension_attributes |= matches!(
                 name.as_str(),
                 "src" | "href" | "rr_src" | "id" | "class" | "textContent" | "_cssText"
-            )
-        }) {
+            );
+            if value.is_null() {
+                continue;
+            }
+            if name == "data-spoiler-mobile-x" {
+                mobile_attributes = true;
+            } else if name == "data-posthog-screenshot"
+                && !tab
+                    .mirror
+                    .get(change.id)
+                    .is_some_and(|node| node.has_attribute(name))
+            {
+                mobile_attributes = true;
+                *coverage
+                    .opaque_mounts
+                    .entry("mobile_screenshot".into())
+                    .or_default() += 1;
+            }
+        }
+        if extension_attributes {
             consider(change.id);
         }
     }
@@ -100,6 +161,12 @@ pub(super) fn on_mutation(
         gesture.window.after_batch(&tab.mirror, &added, at);
     } else {
         tab.mirror.apply(mutation);
+    }
+    tab.mobile_snapshot |= mobile_added || mobile_attributes;
+    if tab.mobile_snapshot && !tab.mobile_semantics_seen {
+        tab.mobile_semantics_seen = tab
+            .root
+            .is_some_and(|root| crate::trace::target::mobile_has_labels(&tab.mirror, root));
     }
     for id in newly_marked {
         if let Some(extension) = tab.mirror.extension(id) {
@@ -142,7 +209,11 @@ pub(super) fn on_mouse(
     mouse: Mouse,
     at: Timestamp,
 ) {
-    if let Some(extension) = tab.mirror.extension(mouse.id) {
+    let native_touch = matches!(
+        mouse.interaction,
+        Interaction::TouchStart | Interaction::TouchEnd
+    ) && tab.mobile_snapshot;
+    if !native_touch && let Some(extension) = tab.mirror.extension(mouse.id) {
         if matches!(
             mouse.interaction,
             Interaction::Click | Interaction::ContextMenu
@@ -154,7 +225,55 @@ pub(super) fn on_mouse(
     match mouse.interaction {
         Interaction::MouseDown | Interaction::TouchStart => {
             tab.pending_double = None;
-            let targets = tab.lineage_ids(mouse.id);
+            let point = native_touch
+                .then_some(())
+                .and_then(|()| mouse.x.zip(mouse.y))
+                .filter(|(x, y)| x.is_finite() && y.is_finite())
+                .map(|(x, y)| Point { x, y });
+            let hit = if native_touch {
+                point.and_then(|point| {
+                    tab.root.and_then(|root| {
+                        crate::trace::target::mobile_hit(&tab.mirror, root, point.x, point.y)
+                    })
+                })
+            } else {
+                None
+            };
+            let targets = tab.lineage_ids(hit.unwrap_or(mouse.id));
+            let pending = if native_touch {
+                point.map(|point| {
+                    let (control, class) = if let Some(hit) = hit {
+                        let (control, class) = tab.mobile_control(context, hit);
+                        (control, class.unwrap_or(TargetClass::Unresolved))
+                    } else {
+                        (
+                            Control {
+                                node: mouse.id,
+                                target: format!(
+                                    "screen ({},{})",
+                                    number_to_string(point.x),
+                                    number_to_string(point.y)
+                                ),
+                                feature: None,
+                                element: None,
+                                reaction: None,
+                            },
+                            TargetClass::Unresolved,
+                        )
+                    };
+                    PendingTouch {
+                        pointer: mouse.id,
+                        at,
+                        point,
+                        control,
+                        class,
+                        path: tab.location.clone(),
+                        surface: tab.surface.clone(),
+                    }
+                })
+            } else {
+                None
+            };
             tab.start_gesture(
                 context,
                 at,
@@ -162,6 +281,42 @@ pub(super) fn on_mouse(
                 targets,
                 actions,
             );
+            tab.pending_touch = pending;
+        }
+        Interaction::TouchEnd => {
+            let Some(pending) = tab.pending_touch.take() else {
+                return;
+            };
+            let end = mouse
+                .x
+                .zip(mouse.y)
+                .filter(|(x, y)| x.is_finite() && y.is_finite())
+                .map_or(pending.point, |(x, y)| Point { x, y });
+            if mouse.id != pending.pointer
+                || at < pending.at
+                || at - pending.at > context.thresholds.gesture_ms
+                || (end.x - pending.point.x).hypot(end.y - pending.point.y) > 20.0
+                || !tab.unclaimed_press(at, context.thresholds.gesture_ms)
+            {
+                return;
+            }
+            tab.typing = None;
+            let mut action = tab.action(
+                context,
+                Detail::Click(Press {
+                    control: pending.control,
+                    point: Some(end),
+                    class: pending.class,
+                }),
+                at,
+            );
+            action.path = pending.path;
+            action.surface = pending.surface;
+            if let Some(gesture) = tab.gesture.as_mut() {
+                gesture.window.until = at + context.thresholds.effect_window_ms;
+                gesture.action = Some(actions.len());
+            }
+            actions.push(action);
         }
         // rrweb emits Click, Click, DblClick: the last click becomes the double-click, and the
         // click before it (same node and tab, just before) folds into it.

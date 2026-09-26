@@ -1,0 +1,122 @@
+{
+ "description": "An Android Publish tap updates a label and removes its draft hint in one mutation.",
+ "app": "mobile",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 1756000000000,
+   "data": {
+    "href": "EditorScreen",
+    "width": 390,
+    "height": 844
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 1756000000000,
+   "data": {
+    "wireframes": [
+     {
+      "id": 10000004,
+      "type": "div",
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "childWireframes": [
+       {
+        "id": 10000001,
+        "type": "text",
+        "x": 24,
+        "y": 80,
+        "width": 270,
+        "height": 36,
+        "text": "Draft"
+       },
+       {
+        "id": 10000003,
+        "type": "input",
+        "x": 24,
+        "y": 160,
+        "width": 140,
+        "height": 48,
+        "inputType": "button",
+        "disabled": false,
+        "value": "Publish"
+       },
+       {
+        "id": 10000002,
+        "type": "text",
+        "x": 24,
+        "y": 240,
+        "width": 300,
+        "height": 32,
+        "text": "Tap Publish to send"
+       }
+      ]
+     }
+    ],
+    "initialOffset": {
+     "top": 0,
+     "left": 0
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001000,
+   "data": {
+    "source": 2,
+    "id": 0,
+    "pointerType": 2,
+    "x": 80,
+    "y": 184,
+    "type": 7
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001050,
+   "data": {
+    "source": 2,
+    "id": 0,
+    "pointerType": 2,
+    "x": 80,
+    "y": 184,
+    "type": 9
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1756000001220,
+   "data": {
+    "source": 0,
+    "updates": [
+     {
+      "parentId": 10000004,
+      "wireframe": {
+       "id": 10000001,
+       "type": "text",
+       "x": 24,
+       "y": 80,
+       "width": 270,
+       "height": 36,
+       "text": "Published"
+      }
+     }
+    ],
+    "removes": [
+     {
+      "parentId": 10000004,
+      "id": 10000002
+     }
+    ]
+   },
+   "win": "w1"
+  }
+ ]
+}
