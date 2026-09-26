@@ -594,7 +594,9 @@ mod tests {
                 stream
                     .write_all(
                         format!(
-                            "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{retry_after}\r\n",
+                            // One request per connection: a pooled connection the server
+                            // already closed would reset the client's next request.
+                            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{retry_after}\r\n",
                             body.len()
                         )
                         .as_bytes(),
@@ -650,7 +652,7 @@ mod tests {
                 request.push(byte[0]);
             }
             stream
-                .write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 2\r\nContent-Length: 0\r\n\r\n")
+                .write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 2\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 .unwrap();
         });
         let error = fetch_with_token(
