@@ -16,6 +16,9 @@ const BLOB_KEYS_PER_REQUEST: usize = 20;
 /// Snapshot requests per fetch, staying under PostHog's 60/minute snapshot throttle.
 pub const MAX_SNAPSHOT_REQUESTS: usize = 59;
 pub const MAX_PAGE_SIZE: usize = 1000;
+/// Bound outlier ID probes to avoid another full retention scan. A recording with
+/// segments farther outside the window can still appear complete incorrectly.
+const OUTLIER_LOOKAROUND_DAYS: u8 = 7;
 
 /// Which recordings discovery lists: one project on one host, within one time window.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -115,8 +118,53 @@ pub struct Discovery {
     pub limit: usize,
 }
 
-fn sql_string(s: &str) -> String {
-    format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+/// Bound every caller-supplied value rather than interpolating it into HogQL.
+fn query_body(query: &Discovery, after: Option<&Position>) -> Value {
+    let mut values = json!({
+        "since": query.window.since,
+        "until": query.window.until,
+    });
+    let cursor = if let Some(after) = after {
+        values["cursor_start"] = json!(after.start_time);
+        values["cursor_id"] = json!(after.session_id);
+        " AND (start_time > parseDateTimeBestEffort({cursor_start}) \
+          OR (start_time = parseDateTimeBestEffort({cursor_start}) AND session_id > {cursor_id}))"
+    } else {
+        ""
+    };
+    // Normal PostHog sessions stop at 24h, but live session IDs can persist for days.
+    // Probe a bounded look-around for disqualifying segments outside the aggregate.
+    let hogql = format!(
+        "SELECT session_id, any(distinct_id) AS distinct_id, \
+         min(min_first_timestamp) AS start_time, max(max_last_timestamp) AS end_time, \
+         sum(active_milliseconds) / 1000 AS active_s, sum(click_count) AS clicks, \
+         sum(keypress_count) AS keypresses, sum(console_error_count) AS console_errors, \
+         argMinMerge(first_url) AS first_url, sum(size) AS bytes, \
+         argMinMerge(snapshot_source) AS snapshot_source, \
+         argMinMerge(snapshot_library) AS snapshot_library, \
+         any(retention_period_days) AS retention_period_days \
+         FROM raw_session_replay_events \
+         WHERE min_first_timestamp >= parseDateTimeBestEffort({{since}}) - INTERVAL 24 HOUR \
+         AND min_first_timestamp <= parseDateTimeBestEffort({{until}}) + INTERVAL 24 HOUR \
+         GROUP BY session_id \
+         HAVING start_time >= parseDateTimeBestEffort({{since}}) \
+         AND end_time <= parseDateTimeBestEffort({{until}}) \
+         AND start_time < now() - INTERVAL 24 HOUR \
+         AND max(is_deleted) = 0 \
+         AND session_id NOT IN (SELECT session_id FROM raw_session_replay_events \
+             WHERE (min_first_timestamp >= parseDateTimeBestEffort({{since}}) - INTERVAL {lookaround} DAY \
+                 AND min_first_timestamp < parseDateTimeBestEffort({{since}}) - INTERVAL 24 HOUR) \
+             OR (min_first_timestamp > parseDateTimeBestEffort({{until}}) + INTERVAL 24 HOUR \
+                 AND min_first_timestamp <= parseDateTimeBestEffort({{until}}) + INTERVAL {lookaround} DAY)){cursor} \
+         ORDER BY start_time ASC, session_id ASC \
+         LIMIT {limit}",
+        limit = query.limit + 1,
+        lookaround = OUTLIER_LOOKAROUND_DAYS,
+    );
+    json!({
+        "name": "spoiler recordings list",
+        "query": { "kind": "HogQLQuery", "query": hogql, "values": values },
+    })
 }
 
 /// Recordings that started at or after `since` and ended by `until`, oldest first.
@@ -130,39 +178,12 @@ pub fn list(http: &Http, query: &Discovery, after: Option<&Position>) -> Result<
         "limit must be between 1 and {MAX_PAGE_SIZE}"
     );
     let window = &query.window;
-    let after = match after {
-        Some(after) => {
-            let start = sql_string(&after.start_time);
-            format!(
-                " AND (start_time > parseDateTimeBestEffort({start}) OR (start_time = parseDateTimeBestEffort({start}) AND session_id > {}))",
-                sql_string(&after.session_id)
-            )
-        }
-        None => String::new(),
-    };
-    let hogql = format!(
-        "SELECT session_id, any(distinct_id) AS distinct_id, \
-         min(min_first_timestamp) AS start_time, max(max_last_timestamp) AS end_time, \
-         sum(active_milliseconds) / 1000 AS active_s, sum(click_count) AS clicks, \
-         sum(keypress_count) AS keypresses, sum(console_error_count) AS console_errors, \
-         argMinMerge(first_url) AS first_url, sum(size) AS bytes \
-         FROM raw_session_replay_events \
-         GROUP BY session_id \
-         HAVING start_time >= parseDateTimeBestEffort({since}) \
-         AND end_time <= parseDateTimeBestEffort({until}){after} \
-         ORDER BY start_time ASC, session_id ASC \
-         LIMIT {limit}",
-        since = sql_string(&window.since),
-        until = sql_string(&window.until),
-        // One extra row tells whether another page exists.
-        limit = query.limit + 1,
-    );
     let url = format!(
         "{}/api/projects/{}/query/",
         window.host.trim_end_matches('/'),
         window.project
     );
-    let body = json!({ "query": { "kind": "HogQLQuery", "query": hogql } });
+    let body = query_body(query, after);
     let response: Value =
         serde_json::from_str(&http.post_json(&url, &credential(TOKEN)?, &body)?)
             .context("query response is not JSON")?;
@@ -330,6 +351,96 @@ mod tests {
                 session_id: "s-1".into(),
             },
         }
+    }
+
+    #[test]
+    fn discovery_binds_window_and_cursor_without_scanning_other_segments() {
+        let mut window = cursor().window;
+        window.since = "2026-09-01T00:00:00Z' sentinel".into();
+        window.until = "2026-09-02T00:00:00Z' endpoint".into();
+        let after = Position {
+            start_time: "2026-09-01T01:00:00Z' cursor".into(),
+            session_id: "session' marker".into(),
+        };
+        let body = query_body(
+            &Discovery {
+                window: window.clone(),
+                limit: 100,
+            },
+            Some(&after),
+        );
+        let sql = body["query"]["query"].as_str().unwrap();
+        assert_eq!(body["name"], "spoiler recordings list");
+        for value in [
+            &window.since,
+            &window.until,
+            &after.start_time,
+            &after.session_id,
+        ] {
+            assert!(!sql.contains(value), "user value leaked into SQL");
+        }
+        assert_eq!(body["query"]["values"]["since"], window.since);
+        assert_eq!(body["query"]["values"]["until"], window.until);
+        assert_eq!(body["query"]["values"]["cursor_start"], after.start_time);
+        assert_eq!(body["query"]["values"]["cursor_id"], after.session_id);
+        assert!(sql.contains(
+            "min_first_timestamp >= parseDateTimeBestEffort({since}) - INTERVAL 24 HOUR"
+        ));
+        assert!(sql.contains(
+            "min_first_timestamp <= parseDateTimeBestEffort({until}) + INTERVAL 24 HOUR"
+        ));
+        assert!(sql.contains("HAVING start_time >= parseDateTimeBestEffort({since})"));
+        assert!(sql.contains("end_time <= parseDateTimeBestEffort({until})"));
+        assert!(sql.contains("start_time < now() - INTERVAL 24 HOUR"));
+        assert!(sql.contains("max(is_deleted) = 0"));
+        assert!(sql.contains("argMinMerge(snapshot_source) AS snapshot_source"));
+        assert!(sql.contains("argMinMerge(snapshot_library) AS snapshot_library"));
+        assert!(sql.contains("retention_period_days"));
+        assert!(sql.contains("session_id > {cursor_id}"));
+        assert!(sql.contains("LIMIT 101"));
+        // Outlier probes cover both sides without scanning the entire retention window.
+        assert!(
+            sql.contains("session_id NOT IN (SELECT session_id FROM raw_session_replay_events")
+        );
+        assert!(
+            sql.contains(
+                "min_first_timestamp >= parseDateTimeBestEffort({since}) - INTERVAL 7 DAY"
+            )
+        );
+        assert!(
+            sql.contains(
+                "min_first_timestamp < parseDateTimeBestEffort({since}) - INTERVAL 24 HOUR"
+            )
+        );
+        assert!(
+            sql.contains(
+                "min_first_timestamp > parseDateTimeBestEffort({until}) + INTERVAL 24 HOUR"
+            )
+        );
+        assert!(
+            sql.contains(
+                "min_first_timestamp <= parseDateTimeBestEffort({until}) + INTERVAL 7 DAY"
+            )
+        );
+    }
+
+    #[test]
+    fn discovery_without_cursor_omits_cursor_bindings() {
+        let body = query_body(
+            &Discovery {
+                window: cursor().window,
+                limit: 1,
+            },
+            None,
+        );
+        assert!(body["query"]["values"].get("cursor_start").is_none());
+        assert!(body["query"]["values"].get("cursor_id").is_none());
+        assert!(
+            !body["query"]["query"]
+                .as_str()
+                .unwrap()
+                .contains("{cursor_id}")
+        );
     }
 
     #[test]
