@@ -76,11 +76,9 @@ impl Kind {
             Self::AnalysisRequest | Self::Analysis => 2,
             // 2: typed click payloads (formerly a flattened click).
             Self::Trace => 2,
-            Self::Recording
-            | Self::VocabularySnapshot
-            | Self::VocabularyCheck
-            | Self::RecordingPage
-            | Self::Session => 1,
+            // 2: `next_cursor` is an opaque token (formerly a JSON object).
+            Self::RecordingPage => 2,
+            Self::Recording | Self::VocabularySnapshot | Self::VocabularyCheck | Self::Session => 1,
         }
     }
 }

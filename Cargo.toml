@@ -15,7 +15,8 @@ authors = ["Sahil Shubham"]
 [workspace.dependencies]
 spoiler-core = { path = "crates/core" }
 anyhow = "1"
-clap = { version = "4", features = ["derive", "env"] }
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
 flate2 = "1"
 indexmap = { version = "2", features = ["serde"] }
 regex = "1"

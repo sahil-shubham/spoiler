@@ -5,8 +5,8 @@
 //! failures on stderr as JSON. Exit codes: `0` success, `1` failure, `2` usage error, `75`
 //! transient upstream failure worth retrying.
 //!
-//! Settings that stay the same across invocations fall back to `SPOILER_*` environment
-//! variables; a flag always wins. Credentials are read from the environment only.
+//! Configuration is flags only; credentials are read from the environment only, so they never
+//! appear in process listings or shell history.
 
 mod http;
 mod io;
@@ -66,12 +66,7 @@ impl std::error::Error for Usage {}
 )]
 struct Cli {
     /// Most JSON a recording may decode to, in MiB (decompressed fields included).
-    #[arg(
-        long,
-        global = true,
-        env = "SPOILER_MAX_INPUT_MIB",
-        default_value_t = 512
-    )]
+    #[arg(long, global = true, default_value_t = 512)]
     max_input_mib: u64,
     #[command(subcommand)]
     command: Command,
@@ -87,23 +82,23 @@ struct Output {
 #[derive(clap::Args)]
 struct Network {
     /// Per-request timeout in seconds.
-    #[arg(long, env = "SPOILER_TIMEOUT", default_value_t = 120)]
+    #[arg(long, default_value_t = 120)]
     timeout: u64,
 }
 
 #[derive(clap::Args)]
 struct Vocab {
     /// Vocabulary file (YAML, JSON, or a snapshot).
-    #[arg(long, env = "SPOILER_VOCAB")]
+    #[arg(long)]
     vocab: PathBuf,
 }
 
 #[derive(clap::Args)]
 struct PostHog {
     /// PostHog project id.
-    #[arg(long, env = "SPOILER_POSTHOG_PROJECT")]
+    #[arg(long)]
     project: u64,
-    #[arg(long, env = "SPOILER_POSTHOG_HOST", default_value = DEFAULT_POSTHOG_HOST)]
+    #[arg(long, default_value = DEFAULT_POSTHOG_HOST)]
     host: String,
 }
 
@@ -121,9 +116,9 @@ struct Ask {
     #[arg(long)]
     prepare_only: bool,
     /// OpenRouter model id. Requires OPENROUTER_API_KEY.
-    #[arg(long, env = "SPOILER_MODEL")]
+    #[arg(long)]
     model: Option<String>,
-    #[arg(long, env = "SPOILER_OPENROUTER_URL", default_value = DEFAULT_OPENROUTER_URL)]
+    #[arg(long, default_value = DEFAULT_OPENROUTER_URL)]
     openrouter_url: String,
 }
 
@@ -145,7 +140,7 @@ enum Command {
         #[command(flatten)]
         vocab: Vocab,
         /// Vocabulary app the recording belongs to.
-        #[arg(long, env = "SPOILER_APP")]
+        #[arg(long)]
         app: String,
         /// Report stage timings on stderr.
         #[arg(long)]
@@ -182,7 +177,7 @@ struct AnalyzeArgs {
     #[arg(long, requires = "app")]
     recording: Option<PathBuf>,
     /// The trace's app; with --trace, checked against it.
-    #[arg(long, env = "SPOILER_APP")]
+    #[arg(long)]
     app: Option<String>,
     #[command(flatten)]
     vocab: Vocab,
@@ -214,9 +209,9 @@ struct RunArgs {
     #[arg(long)]
     recording: Option<PathBuf>,
     /// PostHog project id, for --session.
-    #[arg(long, env = "SPOILER_POSTHOG_PROJECT")]
+    #[arg(long)]
     project: Option<u64>,
-    #[arg(long, env = "SPOILER_POSTHOG_HOST", default_value = DEFAULT_POSTHOG_HOST)]
+    #[arg(long, default_value = DEFAULT_POSTHOG_HOST)]
     host: String,
     /// Most snapshot requests the fetch may make.
     #[arg(long, default_value_t = 50)]
@@ -224,7 +219,7 @@ struct RunArgs {
     #[command(flatten)]
     vocab: Vocab,
     /// Vocabulary app the recording belongs to.
-    #[arg(long, env = "SPOILER_APP")]
+    #[arg(long)]
     app: String,
     /// Analyze only this visit, instead of every visit with user gestures.
     #[arg(long)]
@@ -256,12 +251,12 @@ enum VocabCommand {
         #[arg(long)]
         candidate: Option<PathBuf>,
         /// OpenRouter model id. Requires OPENROUTER_API_KEY.
-        #[arg(long, env = "SPOILER_MODEL", required_unless_present = "candidate")]
+        #[arg(long, required_unless_present = "candidate")]
         model: Option<String>,
         /// Revision the sources were read at, recorded as provenance.
         #[arg(long)]
         source_revision: Option<String>,
-        #[arg(long, env = "SPOILER_OPENROUTER_URL", default_value = DEFAULT_OPENROUTER_URL)]
+        #[arg(long, default_value = DEFAULT_OPENROUTER_URL)]
         openrouter_url: String,
         #[command(flatten)]
         network: Network,
@@ -281,19 +276,24 @@ enum VocabCommand {
 enum RecordingsCommand {
     /// One page of recordings in a time window.
     List {
-        #[command(flatten)]
-        posthog: PostHog,
+        /// PostHog project id.
+        #[arg(long, required_unless_present = "cursor")]
+        project: Option<u64>,
+        /// PostHog host [default: https://eu.posthog.com].
+        #[arg(long)]
+        host: Option<String>,
         /// Earliest recording start (any format ClickHouse parses).
-        #[arg(long)]
-        since: String,
+        #[arg(long, required_unless_present = "cursor")]
+        since: Option<String>,
         /// Latest recording end.
-        #[arg(long)]
-        until: String,
+        #[arg(long, required_unless_present = "cursor")]
+        until: Option<String>,
         #[arg(long, default_value_t = 100)]
         limit: usize,
-        /// Resume from a previous page's `next_cursor`, saved as JSON.
+        /// Resume after a previous page: its `next_cursor` token. The token carries the
+        /// project, host and window; flags given alongside it must match them.
         #[arg(long)]
-        cursor: Option<PathBuf>,
+        cursor: Option<String>,
         #[command(flatten)]
         network: Network,
         #[command(flatten)]
@@ -585,8 +585,7 @@ fn visit_actions(trace: &TraceArtifact, index: usize) -> Result<&[trace::Action]
     })
 }
 
-/// `--prepare-only` and a given response take precedence over a model (which may come from
-/// `SPOILER_MODEL`).
+/// `--prepare-only` and a given response take precedence over `--model`.
 fn answer(ask: &Ask, response: Option<&Path>, network: &Network) -> Result<Answer> {
     if ask.prepare_only {
         return Ok(Answer::Request);
@@ -595,7 +594,7 @@ fn answer(ask: &Ask, response: Option<&Path>, network: &Network) -> Result<Answe
         return Ok(Answer::Response(read_text(response)?));
     }
     let model = ask.model.as_deref().ok_or(Usage(
-        "--model (or SPOILER_MODEL) is required unless --response or --prepare-only is given",
+        "--model is required unless --response or --prepare-only is given",
     ))?;
     Ok(Answer::Model(openrouter::OpenRouter::new(
         &ask.openrouter_url,
@@ -723,7 +722,7 @@ fn vocab(command: VocabCommand) -> Result<()> {
             network,
             output,
         } => {
-            // A prepared candidate needs no model, even when SPOILER_MODEL is set.
+            // A prepared candidate needs no model.
             let client = match (&candidate, model.as_deref()) {
                 (Some(_), _) | (None, None) => None,
                 (None, Some(model)) => Some(openrouter::OpenRouter::new(
@@ -747,7 +746,8 @@ fn vocab(command: VocabCommand) -> Result<()> {
 fn recordings(command: RecordingsCommand, limits: Limits) -> Result<()> {
     match command {
         RecordingsCommand::List {
-            posthog,
+            project,
+            host,
             since,
             until,
             limit,
@@ -755,21 +755,26 @@ fn recordings(command: RecordingsCommand, limits: Limits) -> Result<()> {
             network,
             output,
         } => {
-            let cursor: Option<posthog::Cursor> = cursor
-                .as_deref()
-                .map(|path| {
-                    serde_json::from_slice(&read(path)?)
-                        .with_context(|| format!("invalid cursor {}", path.display()))
-                })
-                .transpose()?;
-            let query = posthog::Discovery {
-                host: &posthog.host,
-                project: posthog.project,
-                since: &since,
-                until: &until,
-                limit,
+            let given = posthog::PartialWindow {
+                host,
+                project,
+                since,
+                until,
             };
-            let page = posthog::list(&http::Http::new(network.timeout)?, &query, cursor.as_ref())?;
+            let (window, after) = match cursor.as_deref() {
+                Some(token) => {
+                    let cursor = posthog::Cursor::decode(token)?;
+                    ensure!(
+                        given.agrees_with(&cursor.window),
+                        "the cursor belongs to a different discovery window than the flags given"
+                    );
+                    (cursor.window, Some(cursor.after))
+                }
+                // The parser requires project, since and until without a cursor.
+                None => (given.complete(DEFAULT_POSTHOG_HOST)?, None),
+            };
+            let query = posthog::Discovery { window, limit };
+            let page = posthog::list(&http::Http::new(network.timeout)?, &query, after.as_ref())?;
             publish(&page, output.out.as_deref())
         }
         RecordingsCommand::Fetch {

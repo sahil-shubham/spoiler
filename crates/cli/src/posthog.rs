@@ -2,6 +2,7 @@
 
 use crate::http::{Http, credential};
 use anyhow::{Context, Result, ensure};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use spoiler_core::{
@@ -16,15 +17,87 @@ const BLOB_KEYS_PER_REQUEST: usize = 20;
 pub const MAX_SNAPSHOT_REQUESTS: usize = 59;
 pub const MAX_PAGE_SIZE: usize = 1000;
 
-/// Where to resume discovery: after the last recording returned, within the same window.
+/// Which recordings discovery lists: one project on one host, within one time window.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Cursor {
+pub struct Window {
     pub host: String,
     pub project: u64,
     pub since: String,
     pub until: String,
+}
+
+/// A window as given on the command line, where a cursor may supply the rest.
+pub struct PartialWindow {
+    pub host: Option<String>,
+    pub project: Option<u64>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+}
+
+impl PartialWindow {
+    /// Every given part equals the window's.
+    pub fn agrees_with(&self, window: &Window) -> bool {
+        self.host.as_ref().is_none_or(|host| *host == window.host)
+            && self.project.is_none_or(|project| project == window.project)
+            && self
+                .since
+                .as_ref()
+                .is_none_or(|since| *since == window.since)
+            && self
+                .until
+                .as_ref()
+                .is_none_or(|until| *until == window.until)
+    }
+
+    pub fn complete(self, default_host: &str) -> Result<Window> {
+        Ok(Window {
+            host: self.host.unwrap_or_else(|| default_host.to_owned()),
+            project: self
+                .project
+                .context("--project is required without --cursor")?,
+            since: self.since.context("--since is required without --cursor")?,
+            until: self.until.context("--until is required without --cursor")?,
+        })
+    }
+}
+
+/// The last recording of a page: the next page starts after it in (start time, id) order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Position {
     pub start_time: String,
     pub session_id: String,
+}
+
+/// Where to resume discovery, as an opaque token: a version prefix and base64url JSON.
+///
+/// Callers store and pass back the token; its contents follow this query's pagination and may
+/// change with it, which the version prefix makes detectable. It is not secret or signed: an
+/// edited token can only select a different window, which is checked against the flags given.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Cursor {
+    pub window: Window,
+    pub after: Position,
+}
+
+const CURSOR_PREFIX: &str = "v1.";
+
+impl Cursor {
+    pub fn encode(&self) -> Result<String> {
+        Ok(format!(
+            "{CURSOR_PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(self)?)
+        ))
+    }
+
+    pub fn decode(token: &str) -> Result<Self> {
+        let payload = token
+            .strip_prefix(CURSOR_PREFIX)
+            .context("not a spoiler v1 cursor")?;
+        let json = URL_SAFE_NO_PAD
+            .decode(payload)
+            .context("the cursor is not valid base64url")?;
+        serde_json::from_slice(&json).context("the cursor's contents are malformed")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,15 +106,12 @@ pub struct RecordingPage {
     pub header: Header,
     /// One object per recording, keyed by HogQL column.
     pub recordings: Vec<Map<String, Value>>,
-    /// Absent when this page is the last in the window.
-    pub next_cursor: Option<Cursor>,
+    /// A [`Cursor`] token for the next page; absent when this page is the last in the window.
+    pub next_cursor: Option<String>,
 }
 
-pub struct Discovery<'a> {
-    pub host: &'a str,
-    pub project: u64,
-    pub since: &'a str,
-    pub until: &'a str,
+pub struct Discovery {
+    pub window: Window,
     pub limit: usize,
 }
 
@@ -54,25 +124,18 @@ fn sql_string(s: &str) -> String {
 /// Every product view counts: there is no host, route or activity filter. Keyset pagination
 /// over (start time, id) keeps pages stable while newer recordings arrive. Recordings still
 /// ingesting past `until` are excluded; choose a settled window and overlap successive syncs.
-pub fn list(http: &Http, query: &Discovery<'_>, cursor: Option<&Cursor>) -> Result<RecordingPage> {
+pub fn list(http: &Http, query: &Discovery, after: Option<&Position>) -> Result<RecordingPage> {
     ensure!(
         (1..=MAX_PAGE_SIZE).contains(&query.limit),
         "limit must be between 1 and {MAX_PAGE_SIZE}"
     );
-    let after = match cursor {
-        Some(cursor) => {
-            let same_window = cursor.host == query.host
-                && cursor.project == query.project
-                && cursor.since == query.since
-                && cursor.until == query.until;
-            ensure!(
-                same_window,
-                "cursor belongs to a different discovery window"
-            );
-            let start = sql_string(&cursor.start_time);
+    let window = &query.window;
+    let after = match after {
+        Some(after) => {
+            let start = sql_string(&after.start_time);
             format!(
                 " AND (start_time > parseDateTimeBestEffort({start}) OR (start_time = parseDateTimeBestEffort({start}) AND session_id > {}))",
-                sql_string(&cursor.session_id)
+                sql_string(&after.session_id)
             )
         }
         None => String::new(),
@@ -89,15 +152,15 @@ pub fn list(http: &Http, query: &Discovery<'_>, cursor: Option<&Cursor>) -> Resu
          AND end_time <= parseDateTimeBestEffort({until}){after} \
          ORDER BY start_time ASC, session_id ASC \
          LIMIT {limit}",
-        since = sql_string(query.since),
-        until = sql_string(query.until),
+        since = sql_string(&window.since),
+        until = sql_string(&window.until),
         // One extra row tells whether another page exists.
         limit = query.limit + 1,
     );
     let url = format!(
         "{}/api/projects/{}/query/",
-        query.host.trim_end_matches('/'),
-        query.project
+        window.host.trim_end_matches('/'),
+        window.project
     );
     let body = json!({ "query": { "kind": "HogQLQuery", "query": hogql } });
     let response: Value =
@@ -108,20 +171,22 @@ pub fn list(http: &Http, query: &Discovery<'_>, cursor: Option<&Cursor>) -> Resu
     let has_more = recordings.len() > query.limit;
     recordings.truncate(query.limit);
     let next_cursor = match recordings.last() {
-        Some(last) if has_more => Some(Cursor {
-            host: query.host.to_owned(),
-            project: query.project,
-            since: query.since.to_owned(),
-            until: query.until.to_owned(),
-            start_time: last["start_time"]
-                .as_str()
-                .context("row has no start_time")?
-                .to_owned(),
-            session_id: last["session_id"]
-                .as_str()
-                .context("row has no session_id")?
-                .to_owned(),
-        }),
+        Some(last) if has_more => Some(
+            Cursor {
+                window: window.clone(),
+                after: Position {
+                    start_time: last["start_time"]
+                        .as_str()
+                        .context("row has no start_time")?
+                        .to_owned(),
+                    session_id: last["session_id"]
+                        .as_str()
+                        .context("row has no session_id")?
+                        .to_owned(),
+                },
+            }
+            .encode()?,
+        ),
         _ => None,
     };
     Ok(RecordingPage {
@@ -245,4 +310,53 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
         },
         events,
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn cursor() -> Cursor {
+        Cursor {
+            window: Window {
+                host: "https://eu.posthog.com".into(),
+                project: 7,
+                since: "2026-09-01".into(),
+                until: "2026-09-02".into(),
+            },
+            after: Position {
+                start_time: "2026-09-01 10:00:00".into(),
+                session_id: "s-1".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_cursor_token_resumes_the_same_window_and_position() {
+        let token = cursor().encode().unwrap();
+        assert!(
+            !token.contains(['"', '{', ' ', '/', '+']),
+            "shell- and column-safe: {token}"
+        );
+        assert_eq!(Cursor::decode(&token).unwrap(), cursor());
+        // Another format version, or a token that is not one, is refused rather than guessed at.
+        assert!(Cursor::decode(&token.replacen("v1.", "v2.", 1)).is_err());
+        assert!(Cursor::decode(&token[..token.len() - 3]).is_err());
+    }
+
+    #[test]
+    fn flags_beside_a_cursor_must_match_its_window() {
+        let window = cursor().window;
+        let given = |project, since: Option<&str>| PartialWindow {
+            host: None,
+            project,
+            since: since.map(str::to_owned),
+            until: None,
+        };
+        assert!(given(None, None).agrees_with(&window));
+        assert!(given(Some(7), Some("2026-09-01")).agrees_with(&window));
+        assert!(!given(Some(8), None).agrees_with(&window));
+        assert!(!given(None, Some("2026-08-01")).agrees_with(&window));
+    }
 }

@@ -55,24 +55,9 @@ spoiler recordings fetch --project 123 --session SESSION_ID \
 - `spoiler compile --recording FILE --vocab FILE --app APP [--out FILE]` creates a trace without network access. `--timings` prints stage timings on stderr.
 - `spoiler analyze --trace FILE --vocab FILE` prepares the model request (`--prepare-only`), validates an existing answer (`--response FILE`), or calls a model (`--model MODEL`); the first two take precedence over a model. Alternatively supply `--recording FILE --app APP` instead of `--trace`; `--visit N` selects one visit (zero-based). `--context FILE` adds a session header and `--system-prompt FILE` replaces the narration instructions. A model call requires `OPENROUTER_API_KEY` in the environment; no model is selected implicitly.
 - `spoiler vocab check --vocab FILE [--out FILE]` checks matcher validity and reports inert entries. `spoiler vocab build --config PRODUCT.json --source ROUTES.txt --source CONTROLS.txt --source-revision REV --model MODEL --out VOCAB.json` builds a snapshot from explicit UTF-8 source files and a product config (`apps`, including project, host, and audience). It requires `OPENROUTER_API_KEY`, unless `--candidate FILE` supplies an already prepared vocabulary, which takes precedence over `--model`. Consumers accept YAML/JSON vocabulary files or verified snapshots; they never regenerate implicitly.
-- `spoiler recordings list --project ID --since START --until END --limit 100 [--cursor FILE] [--out FILE]` discovers one page; `spoiler recordings fetch --project ID --session ID [--out FILE]` downloads snapshots. Both require `POSTHOG_API_KEY` in the environment. The default host is `https://eu.posthog.com`; use `--host` for another PostHog instance.
+- `spoiler recordings list --project ID --since START --until END [--limit 100] [--out FILE]` discovers one page (`--cursor TOKEN` continues); `spoiler recordings fetch --project ID --session ID [--out FILE]` downloads snapshots. Both require `POSTHOG_API_KEY` in the environment. The default host is `https://eu.posthog.com`; use `--host` for another PostHog instance.
 
-### Environment
-
-Settings that rarely change between invocations fall back to environment variables. A flag always wins, and `--help` shows each variable next to its flag.
-
-| Variable | Flag | Used by |
-| --- | --- | --- |
-| `SPOILER_VOCAB` | `--vocab` | `compile`, `analyze`, `run`, `vocab check` |
-| `SPOILER_APP` | `--app` | `compile`, `analyze`, `run` |
-| `SPOILER_MODEL` | `--model` | `analyze`, `run`, `vocab build` |
-| `SPOILER_OPENROUTER_URL` | `--openrouter-url` | `analyze`, `run`, `vocab build` |
-| `SPOILER_POSTHOG_PROJECT` | `--project` | `recordings`, `run` |
-| `SPOILER_POSTHOG_HOST` | `--host` | `recordings`, `run` |
-| `SPOILER_TIMEOUT` | `--timeout` | network commands |
-| `SPOILER_MAX_INPUT_MIB` | `--max-input-mib` | all |
-
-Credentials are environment-only, never flags: `POSTHOG_API_KEY` (a personal API key with read access to recordings) and `OPENROUTER_API_KEY`. `SPOILER_APP` is checked against a trace's app in `analyze --trace`, so unset it when analyzing traces from several apps.
+Configuration is flags only. Credentials come from the environment only, so they never appear in process listings or shell history: `POSTHOG_API_KEY` (a personal API key with read access to recordings) and `OPENROUTER_API_KEY`.
 
 For example, with a PostHog key set:
 
@@ -82,7 +67,7 @@ spoiler recordings list --project 123 --since 2026-09-01T00:00:00Z \
 spoiler recordings fetch --project 123 --session SESSION_ID --out artifacts/recording.json
 ```
 
-Discovery queries `raw_session_replay_events` and paginates by start time and session id. Save `next_cursor` as JSON and pass it via `--cursor` with the same project, host, and window. Recordings ending after `--until` are excluded: choose a settled window and overlap syncs. Fetch supports `blob_v2` sources and limits requests (default `--max-requests 50`, maximum 59, with 20 blob keys per request). Commands do not retry; the caller owns retry policy and aggregate rate admission. `--timeout` applies per request. Redirects are disabled; credentials travel only over HTTPS, except to loopback test servers.
+Discovery queries `raw_session_replay_events` and paginates by start time and session id. A page's `next_cursor` is an opaque token; pass it back as `--cursor TOKEN` to get the next page. The token carries the project, host, and window, so `spoiler recordings list --cursor TOKEN` needs no other flags, and any given alongside it must match. Store it as a string; its contents are not a stable interface. Recordings ending after `--until` are excluded: choose a settled window and overlap syncs. Fetch supports `blob_v2` sources and limits requests (default `--max-requests 50`, maximum 59, with 20 blob keys per request). Commands do not retry; the caller owns retry policy and aggregate rate admission. `--timeout` applies per request. Redirects are disabled; credentials travel only over HTTPS, except to loopback test servers.
 
 ## Vocabulary and prompts
 
@@ -104,7 +89,7 @@ The binary embeds `crates/core/prompts/narrate/system.md`, `crates/core/prompts/
 
 ## Artifacts, validation, and limits
 
-Every artifact has a `kind` and per-kind `schema_version`: `trace`, `analysis_request`, and `analysis` use schema version 2; the other kinds (`recording`, `recording_page`, `session`, `vocabulary_snapshot`, `vocabulary_check`) use version 1. A trace records its compiler version and SHA-256 digests of the recording and vocabulary. Readers reject incompatible kinds, schemas, compiler versions, invalid trace bounds/refs, and vocabulary mismatches. Trace refs (`e1`, `e2`, …) identify actions within one trace, including when analyzing a single visit. Visits split after 30 minutes without actions across tabs; a scheduler can analyze each visit with gestures separately.
+Every artifact has a `kind` and per-kind `schema_version`: `trace`, `analysis_request`, `analysis`, and `recording_page` use schema version 2; the other kinds (`recording`, `session`, `vocabulary_snapshot`, `vocabulary_check`) use version 1. A trace records its compiler version and SHA-256 digests of the recording and vocabulary. Readers reject incompatible kinds, schemas, compiler versions, invalid trace bounds/refs, and vocabulary mismatches. Trace refs (`e1`, `e2`, …) identify actions within one trace, including when analyzing a single visit. Visits split after 30 minutes without actions across tabs; a scheduler can analyze each visit with gestures separately.
 
 The trace's `coverage` reports duplicate, uninterpreted, or malformed events and opaque mounts such as iframes and canvases. Validated analyses retain only trace-supported claims, derive signal lists and uncited gestures, and report unsupported duration claims. OpenRouter calls request zero-data-retention routing and required parameter support. Invalid model answers can receive one corrected retry; `--response` applies the same acceptance bar offline without retrying.
 
