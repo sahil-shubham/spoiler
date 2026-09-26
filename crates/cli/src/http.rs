@@ -176,6 +176,13 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // Read the whole request first: answering and closing mid-request resets the
+            // connection, which is a (retryable) transport error instead of an oversized body.
+            let mut request = Vec::new();
+            let mut byte = [0; 1];
+            while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap() == 1 {
+                request.push(byte[0]);
+            }
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nhello world!")
                 .unwrap();
