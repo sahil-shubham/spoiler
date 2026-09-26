@@ -1,0 +1,4 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.item-create	/items/new				
+e2	1.1	w1	click	demo.item-create	button "Search"	demo.create.search		none	unresponsive
+e3	3.0	w1	click	demo.item-create	button	demo.create.save-bar		none	unresponsive

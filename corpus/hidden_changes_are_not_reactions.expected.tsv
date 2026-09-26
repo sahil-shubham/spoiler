@@ -1,0 +1,5 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	1.1	w1	click	demo.page	button "Save"		1050ms	window hidden; window visible; text "Save failed" → "Ready"	slow
+e3	1.1	w1	hidden						
+e4	2.0	w1	visible						

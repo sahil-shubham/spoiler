@@ -1,0 +1,162 @@
+{
+ "description": "Screen-reader-only alerts and their text are not visible reactions or errors.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 19,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 18,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 17,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 16,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          },
+          {
+           "type": 2,
+           "id": 13,
+           "tagName": "div",
+           "attributes": {},
+           "childNodes": []
+          },
+          {
+           "type": 2,
+           "id": 15,
+           "tagName": "div",
+           "attributes": {
+            "role": "alert",
+            "class": "sr-only"
+           },
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 14,
+             "textContent": "Waiting"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1200,
+   "data": {
+    "source": 0,
+    "adds": [],
+    "removes": [],
+    "texts": [
+     {
+      "id": 14,
+      "value": "Save failed"
+     }
+    ],
+    "attributes": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1300,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 13,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 21,
+       "tagName": "div",
+       "attributes": {
+        "role": "alert",
+        "style": "clip: rect(0, 0, 0, 0)"
+       },
+       "childNodes": [
+        {
+         "type": 3,
+         "id": 20,
+         "textContent": "Save failed"
+        }
+       ]
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  }
+ ]
+}

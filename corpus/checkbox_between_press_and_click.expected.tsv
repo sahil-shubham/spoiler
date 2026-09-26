@@ -1,0 +1,4 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	1.0	w1	input	demo.page	input			typed checked	
+e3	1.0	w1	click	demo.page	input		on press	checked:false→true	

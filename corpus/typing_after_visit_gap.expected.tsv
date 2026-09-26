@@ -1,0 +1,5 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	1.0	w1	input	demo.page	input			typed "before"	
+e3	1.0	w1	idle					1800s	
+e4	1801.0	w1	input	demo.page	input			typed "after"	

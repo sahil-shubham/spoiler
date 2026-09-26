@@ -1,0 +1,31 @@
+{
+  "reasoning": "The Save click has a visible text change to Saved.",
+  "who": "Unknown; no session context was supplied.",
+  "intent": {
+    "text": "Save the current page's content.",
+    "confidence": 0.6
+  },
+  "steps": [
+    {
+      "refs": ["e2"],
+      "action": "Clicked the Save button.",
+      "response": "The button label changed from Save to Saved.",
+      "feature": null,
+      "outcome": "progressed"
+    }
+  ],
+  "tasks": [
+    {
+      "goal": "Save the current page's content.",
+      "refs": ["e2"],
+      "outcome": "done",
+      "obstacle": null
+    }
+  ],
+  "friction": [],
+  "outcome": {
+    "success": "yes",
+    "text": "The button displayed Saved."
+  },
+  "summary": "The user clicked Save. The button changed to Saved. No friction signal was detected. No further user gesture is visible."
+}

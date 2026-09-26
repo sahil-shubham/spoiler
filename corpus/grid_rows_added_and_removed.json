@@ -1,0 +1,312 @@
+{
+ "description": "A row that appears and one that leaves are row changes with their cells.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 33,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 32,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 31,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 30,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 29,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 28,
+             "textContent": "Add row"
+            }
+           ]
+          },
+          {
+           "type": 2,
+           "id": 27,
+           "tagName": "table",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 2,
+             "id": 26,
+             "tagName": "thead",
+             "attributes": {},
+             "childNodes": [
+              {
+               "type": 2,
+               "id": 25,
+               "tagName": "tr",
+               "attributes": {},
+               "childNodes": [
+                {
+                 "type": 2,
+                 "id": 20,
+                 "tagName": "th",
+                 "attributes": {},
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 19,
+                   "textContent": "Name"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 22,
+                 "tagName": "th",
+                 "attributes": {},
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 21,
+                   "textContent": "Status"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 24,
+                 "tagName": "th",
+                 "attributes": {},
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 23,
+                   "textContent": "Notes"
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "type": 2,
+             "id": 18,
+             "tagName": "tbody",
+             "attributes": {},
+             "childNodes": [
+              {
+               "type": 2,
+               "id": 17,
+               "tagName": "tr",
+               "attributes": {
+                "role": "row",
+                "data-row-id": "r1"
+               },
+               "childNodes": [
+                {
+                 "type": 2,
+                 "id": 12,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "0"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 11,
+                   "textContent": "Alpha"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 14,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "1"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 13,
+                   "textContent": "Queued"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 16,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "2"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 15,
+                   "textContent": ""
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 29,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 29,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1100,
+   "data": {
+    "source": 0,
+    "adds": [],
+    "removes": [
+     {
+      "parentId": 18,
+      "id": 17
+     }
+    ],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1200,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 18,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 40,
+       "tagName": "tr",
+       "attributes": {
+        "role": "row",
+        "data-row-id": "r9"
+       },
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 35,
+         "tagName": "td",
+         "attributes": {
+          "role": "gridcell",
+          "data-col": "0"
+         },
+         "childNodes": [
+          {
+           "type": 3,
+           "id": 34,
+           "textContent": "Gamma"
+          }
+         ]
+        },
+        {
+         "type": 2,
+         "id": 37,
+         "tagName": "td",
+         "attributes": {
+          "role": "gridcell",
+          "data-col": "1"
+         },
+         "childNodes": [
+          {
+           "type": 3,
+           "id": 36,
+           "textContent": "New"
+          }
+         ]
+        },
+        {
+         "type": 2,
+         "id": 39,
+         "tagName": "td",
+         "attributes": {
+          "role": "gridcell",
+          "data-col": "2"
+         },
+         "childNodes": [
+          {
+           "type": 3,
+           "id": 38,
+           "textContent": ""
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  }
+ ]
+}

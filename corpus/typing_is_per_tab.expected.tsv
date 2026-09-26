@@ -1,0 +1,5 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	0.0	w2	nav	demo.page	/page				
+e3	1.0	w1	input	demo.page	input			typed "ac"	
+e4	1.1	w2	input	demo.page	input			typed "bd"	

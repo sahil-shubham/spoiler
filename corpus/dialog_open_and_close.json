@@ -1,0 +1,178 @@
+{
+ "description": "A dialog opening on one click and closing on another.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 17,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 16,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 15,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Delete"
+            }
+           ]
+          },
+          {
+           "type": 2,
+           "id": 13,
+           "tagName": "div",
+           "attributes": {},
+           "childNodes": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1100,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 13,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 20,
+       "tagName": "div",
+       "attributes": {
+        "role": "dialog",
+        "aria-label": "Delete record?"
+       },
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 19,
+         "tagName": "button",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 3,
+           "id": 18,
+           "textContent": "Cancel"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 5000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 19,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 5050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 19,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 5100,
+   "data": {
+    "source": 0,
+    "adds": [],
+    "removes": [
+     {
+      "parentId": 13,
+      "id": 20
+     }
+    ],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  }
+ ]
+}

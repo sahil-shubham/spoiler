@@ -1,0 +1,5 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	0.0	w2	nav	demo.page	/page				
+e3	1.1	w1	click	demo.page	button "In A"		450ms	text "In A" → "Done A"	
+e4	1.1	w2	click	demo.page	button "In B"			none	unresponsive

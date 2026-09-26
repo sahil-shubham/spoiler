@@ -1,0 +1,26 @@
+# Build output
+/target/
+*.profraw
+*.profdata
+
+# Local run outputs (may contain private recordings) and interrupted atomic writes
+/artifacts/
+.spoiler-*.tmp
+
+# Local tool state (worktrees/clones of this repo)
+/.delta/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Script runtimes
+__pycache__/
+*.py[cod]
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

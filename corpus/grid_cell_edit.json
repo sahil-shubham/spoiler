@@ -1,0 +1,295 @@
+{
+ "description": "Editing a grid cell is a cell change on that row and column.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 40,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 39,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 38,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 37,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 36,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 35,
+             "textContent": "Save"
+            }
+           ]
+          },
+          {
+           "type": 2,
+           "id": 34,
+           "tagName": "table",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 2,
+             "id": 33,
+             "tagName": "thead",
+             "attributes": {},
+             "childNodes": [
+              {
+               "type": 2,
+               "id": 32,
+               "tagName": "tr",
+               "attributes": {},
+               "childNodes": [
+                {
+                 "type": 2,
+                 "id": 27,
+                 "tagName": "th",
+                 "attributes": {},
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 26,
+                   "textContent": "Name"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 29,
+                 "tagName": "th",
+                 "attributes": {},
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 28,
+                   "textContent": "Status"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 31,
+                 "tagName": "th",
+                 "attributes": {},
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 30,
+                   "textContent": "Notes"
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "type": 2,
+             "id": 25,
+             "tagName": "tbody",
+             "attributes": {},
+             "childNodes": [
+              {
+               "type": 2,
+               "id": 17,
+               "tagName": "tr",
+               "attributes": {
+                "role": "row",
+                "data-row-id": "r1"
+               },
+               "childNodes": [
+                {
+                 "type": 2,
+                 "id": 12,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "0"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 11,
+                   "textContent": "Alpha"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 14,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "1"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 13,
+                   "textContent": "Queued"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 16,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "2"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 15,
+                   "textContent": ""
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "type": 2,
+               "id": 24,
+               "tagName": "tr",
+               "attributes": {
+                "role": "row",
+                "data-row-id": "r2"
+               },
+               "childNodes": [
+                {
+                 "type": 2,
+                 "id": 19,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "0"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 18,
+                   "textContent": "Beta"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 21,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "1"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 20,
+                   "textContent": "Done"
+                  }
+                 ]
+                },
+                {
+                 "type": 2,
+                 "id": 23,
+                 "tagName": "td",
+                 "attributes": {
+                  "role": "gridcell",
+                  "data-col": "2"
+                 },
+                 "childNodes": [
+                  {
+                   "type": 3,
+                   "id": 22,
+                   "textContent": ""
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 36,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 36,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1200,
+   "data": {
+    "source": 0,
+    "adds": [],
+    "removes": [],
+    "texts": [
+     {
+      "id": 13,
+      "value": "Scheduled"
+     }
+    ],
+    "attributes": []
+   },
+   "win": "w1"
+  }
+ ]
+}

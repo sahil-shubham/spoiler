@@ -1,0 +1,5 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	1.1	w1	click	demo.page	button "Save"			net 500 /api/save 2300ms	error_after,unresponsive
+e3	1.1	w1	net_error	demo.page	500 /api/save				
+e4	1.6	w1	click	demo.page	button "Next"			none	unresponsive

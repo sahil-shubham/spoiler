@@ -1,0 +1,8 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	0.0	w1	nav	demo.page	/page				
+e2	1.1	w1	click	demo.page	button "Save"			none	unresponsive
+e3	1.1	w1	idle					40s	
+e4	41.0	w1	click	demo.page	button "Save"			window hidden	
+e5	42.0	w1	hidden						
+e6	102.0	w1	visible						
+e7	103.0	w1	click	demo.page	button "Save"			none	unresponsive

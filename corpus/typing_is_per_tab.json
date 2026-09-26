@@ -1,0 +1,156 @@
+{
+ "description": "Typing in two tabs keeps each field's input action open independently.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 11,
+           "tagName": "input",
+           "attributes": {
+            "type": "text"
+           },
+           "childNodes": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w2"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 20,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 19,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 18,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 17,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "input",
+           "attributes": {
+            "type": "text"
+           },
+           "childNodes": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w2"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 5,
+    "id": 11,
+    "text": "a"
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1100,
+   "data": {
+    "source": 5,
+    "id": 12,
+    "text": "b"
+   },
+   "win": "w2"
+  },
+  {
+   "type": 3,
+   "timestamp": 1200,
+   "data": {
+    "source": 5,
+    "id": 11,
+    "text": "ac"
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1300,
+   "data": {
+    "source": 5,
+    "id": 12,
+    "text": "bd"
+   },
+   "win": "w2"
+  }
+ ]
+}

@@ -1,0 +1,101 @@
+{
+ "description": "Masked typing is one input action per field; only the length is known.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 15,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 14,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 12,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 11,
+           "tagName": "input",
+           "attributes": {
+            "type": "password"
+           },
+           "childNodes": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 5,
+    "id": 11,
+    "text": "*"
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1100,
+   "data": {
+    "source": 5,
+    "id": 11,
+    "text": "**"
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1200,
+   "data": {
+    "source": 5,
+    "id": 11,
+    "text": "***"
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1300,
+   "data": {
+    "source": 5,
+    "id": 11,
+    "text": "****"
+   },
+   "win": "w1"
+  }
+ ]
+}

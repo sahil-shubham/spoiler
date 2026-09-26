@@ -1,0 +1,104 @@
+{
+ "description": "Coverage reports content the trace cannot see and events it reads past.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 11,
+           "tagName": "iframe",
+           "attributes": {
+            "src": "https://other.test"
+           },
+           "childNodes": []
+          },
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "canvas",
+           "attributes": {},
+           "childNodes": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 500,
+   "data": {
+    "source": 1,
+    "positions": [
+     {
+      "x": 1,
+      "y": 1,
+      "id": 1,
+      "timeOffset": 0
+     }
+    ]
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 600,
+   "data": {
+    "source": 9,
+    "id": 1,
+    "type": 0,
+    "commands": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 700,
+   "data": {
+    "tag": "app-specific",
+    "payload": {}
+   },
+   "win": "w1"
+  }
+ ]
+}

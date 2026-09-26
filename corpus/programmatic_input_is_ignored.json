@@ -1,0 +1,87 @@
+{
+ "description": "An input on a field mounted a moment ago is the page initializing a form, not typing.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 14,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 13,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 12,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 11,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": []
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 0,
+    "adds": [
+     {
+      "parentId": 11,
+      "nextId": null,
+      "node": {
+       "type": 2,
+       "id": 15,
+       "tagName": "input",
+       "attributes": {
+        "type": "text"
+       },
+       "childNodes": []
+      }
+     }
+    ],
+    "removes": [],
+    "texts": [],
+    "attributes": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 5,
+    "id": 15,
+    "text": "prefilled"
+   },
+   "win": "w1"
+  }
+ ]
+}

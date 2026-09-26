@@ -1,0 +1,16 @@
+# Vocabulary shared by every corpus case: a small demo product.
+version: 1
+apps:
+  demo: { project: 1, host: demo.test, audience: "people using the demo product" }
+surfaces:
+  - { id: demo.page, app: demo, route: /page, name: "Page" }
+  - { id: demo.other, app: demo, route: /other, name: "Other page" }
+  - { id: demo.item, app: demo, route: "/items/:id", name: "Item" }
+  - { id: demo.item-create, app: demo, route: /items/new, name: "Create item" }
+features:
+  - { id: demo.chrome.search, surface: "*", app: demo, name: "Global search", matchers: { text: [Search] } }
+  - { id: demo.create.search, surface: demo.item-create, name: "Search similar items", matchers: { text: [Search] } }
+  - { id: demo.create.save-bar, surface: demo.item-create, name: "Save bar", matchers: { testid: [save-bar] } }
+grid:
+  row_keys: [{ attribute: data-row-id }]
+  label_columns: [[name]]

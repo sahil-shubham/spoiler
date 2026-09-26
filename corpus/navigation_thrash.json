@@ -1,0 +1,67 @@
+{
+ "description": "Navigating A \u2192 B \u2192 A within ten seconds is thrash.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 14,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 13,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 12,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 11,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": []
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 4,
+   "timestamp": 2000,
+   "data": {
+    "href": "https://demo.test/other"
+   },
+   "win": "w1"
+  },
+  {
+   "type": 4,
+   "timestamp": 5000,
+   "data": {
+    "href": "https://demo.test/page"
+   },
+   "win": "w1"
+  }
+ ]
+}

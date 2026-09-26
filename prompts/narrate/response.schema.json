@@ -1,0 +1,215 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reasoning",
+    "who",
+    "intent",
+    "steps",
+    "tasks",
+    "friction",
+    "outcome",
+    "summary"
+  ],
+  "properties": {
+    "reasoning": {
+      "type": "string",
+      "description": "scratch work; not shown to readers"
+    },
+    "who": {
+      "type": "string",
+      "description": "the user, from the session header: name, role, organization"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "confidence"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "what the user came to do, specific to this session"
+        },
+        "confidence": {
+          "type": "number",
+          "description": "0 to 1"
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "refs",
+          "action",
+          "response",
+          "feature",
+          "outcome"
+        ],
+        "properties": {
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "trace refs this step is based on; must exist in the trace"
+          },
+          "action": {
+            "type": "string",
+            "description": "exactly what the user did: control, column, row, values shown, picked or typed"
+          },
+          "response": {
+            "type": "string",
+            "description": "what the product did in reply and how fast, with numbers from the trace"
+          },
+          "feature": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "feature id from the trace's feature column, or null"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "progressed",
+              "no_effect",
+              "error",
+              "abandoned",
+              "left"
+            ]
+          }
+        }
+      },
+      "description": "one step per user action"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "goal",
+          "refs",
+          "outcome",
+          "obstacle"
+        ],
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "the job the user was doing, in the product's terms, specific"
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "every trace ref of the attempt, first to last, detours included"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "done",
+              "workaround",
+              "gave_up",
+              "unclear"
+            ]
+          },
+          "obstacle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "what observably slowed or failed it; null if it went straight"
+          }
+        }
+      },
+      "description": "one entry per attempt at a job; a task can span many steps, pages and tabs"
+    },
+    "friction": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "refs",
+          "kind",
+          "what",
+          "why",
+          "severity"
+        ],
+        "properties": {
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "trace refs this is based on; must exist in the trace"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "dead_click",
+              "rage_click",
+              "error",
+              "confusion_loop",
+              "slow",
+              "abandonment",
+              "other"
+            ]
+          },
+          "what": {
+            "type": "string",
+            "description": "observable and specific: which control, which row, what the user did next"
+          },
+          "why": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "an engineering hypothesis, labelled as one; null if none"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "blocking",
+              "degrading",
+              "cosmetic"
+            ]
+          }
+        }
+      },
+      "description": "where the product got in the user's way"
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "success",
+        "text"
+      ],
+      "properties": {
+        "success": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no",
+            "unknown"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "description": "how the session ended"
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "description": "4-8 dense sentences"
+    }
+  }
+}
