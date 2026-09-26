@@ -216,6 +216,9 @@ struct RunArgs {
     /// Most snapshot requests the fetch may make.
     #[arg(long, default_value_t = 50)]
     max_requests: usize,
+    /// Most seconds to wait across 429 Retry-After responses when fetching a session.
+    #[arg(long, default_value_t = 60, requires = "session")]
+    max_wait: u64,
     #[command(flatten)]
     vocab: Vocab,
     /// Vocabulary app the recording belongs to.
@@ -307,6 +310,9 @@ enum RecordingsCommand {
         session: String,
         #[arg(long, default_value_t = 50)]
         max_requests: usize,
+        /// Most seconds to wait across 429 Retry-After responses.
+        #[arg(long, default_value_t = 60)]
+        max_wait: u64,
         #[command(flatten)]
         network: Network,
         #[command(flatten)]
@@ -648,6 +654,7 @@ fn run_session(args: RunArgs, limits: Limits) -> Result<()> {
                 project: args.project.context("--session requires --project")?,
                 session,
                 max_requests: args.max_requests,
+                max_wait: args.max_wait,
                 limits,
             };
             let artifact = posthog::fetch(&http::Http::new(args.network.timeout)?, &snapshot)?;
@@ -781,6 +788,7 @@ fn recordings(command: RecordingsCommand, limits: Limits) -> Result<()> {
             posthog,
             session,
             max_requests,
+            max_wait,
             network,
             output,
         } => {
@@ -789,6 +797,7 @@ fn recordings(command: RecordingsCommand, limits: Limits) -> Result<()> {
                 project: posthog.project,
                 session: &session,
                 max_requests,
+                max_wait,
                 limits,
             };
             let recording = posthog::fetch(&http::Http::new(network.timeout)?, &snapshot)?;

@@ -76,10 +76,6 @@ pub enum DecodeError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("unrecognized snapshot line")]
-    UnrecognizedLine,
-    #[error("event type {0} is out of range")]
-    EventType(u64),
     #[error("reading {path}")]
     Io {
         path: std::path::PathBuf,
@@ -210,6 +206,7 @@ pub struct Recording {
     text: String,
     entries: Vec<Entry>,
     tabs: Vec<String>,
+    malformed_snapshot_lines: usize,
     budget: Budget,
 }
 
@@ -226,8 +223,9 @@ pub struct EventRef<'r> {
 }
 
 impl EventRef<'_> {
-    /// The same event, recorded again (PostHog stores some events twice): same tab, kind and
-    /// data. Data is compared as text, which is exact for the compact JSON recorders write.
+    /// Same timestamp/tab/kind/compression and exact data text, across all sources. Unlike
+    /// PostHog's source-local whole-event hash, this also removes cross-source ingestion copies.
+    /// Extra event metadata cannot change a trace action if these fields match.
     pub fn same_as(&self, other: &EventRef<'_>) -> bool {
         self.kind == other.kind
             && self.tab == other.tab
@@ -285,6 +283,7 @@ struct Indexer<'t> {
     entries: Vec<Entry>,
     tabs: Vec<String>,
     tab_numbers: FxHashMap<String, u32>,
+    malformed_snapshot_lines: usize,
 }
 
 impl<'t> Indexer<'t> {
@@ -294,6 +293,7 @@ impl<'t> Indexer<'t> {
             entries: Vec::new(),
             tabs: Vec::new(),
             tab_numbers: FxHashMap::default(),
+            malformed_snapshot_lines: 0,
         }
     }
 
@@ -367,16 +367,21 @@ impl Recording {
         replace_lone_surrogates(&mut bytes);
         // Only ASCII escapes changed, so the text is still UTF-8.
         let text = String::from_utf8(bytes).map_err(|_| DecodeError::NotUtf8("recording"))?;
-        let (entries, tabs) = {
+        let (entries, tabs, malformed_snapshot_lines) = {
             let mut indexer = Indexer::new(&text);
             index(&mut indexer)?;
-            (indexer.entries, indexer.tabs)
+            (
+                indexer.entries,
+                indexer.tabs,
+                indexer.malformed_snapshot_lines,
+            )
         };
         Ok(Self {
             text,
             entries,
             tabs,
             budget,
+            malformed_snapshot_lines,
         })
     }
 
@@ -416,7 +421,10 @@ impl Recording {
             }
             text.push_str(body);
         }
-        Self::build(text, budget, posthog::index_lines)
+        Self::build(text, budget, |indexer| {
+            posthog::index_lines(indexer);
+            Ok(())
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -430,6 +438,11 @@ impl Recording {
     /// Bytes of recording text held.
     pub fn text_len(&self) -> usize {
         self.text.len()
+    }
+
+    /// Unparseable PostHog snapshot lines omitted from the event index.
+    pub fn malformed_snapshot_lines(&self) -> usize {
+        self.malformed_snapshot_lines
     }
 
     pub fn events(&self) -> impl Iterator<Item = EventRef<'_>> {
@@ -454,8 +467,8 @@ impl Recording {
         Ok(unpacked)
     }
 
-    /// What an event means. Errors only for corrupt or oversized compressed content; oddly
-    /// shaped data is a [`Reading::Malformed`]: skipped and counted, never fatal.
+    /// What an event means. Only an exhausted input budget is fatal; corrupt compressed
+    /// content and oddly shaped data are skipped and counted as [`Reading::Malformed`].
     pub fn read(&self, event: &EventRef<'_>) -> Result<Reading> {
         use rrweb::{
             CUSTOM, DOM_CONTENT_LOADED, FULL_SNAPSHOT, INCREMENTAL_SNAPSHOT, LOAD, META, PLUGIN,
@@ -482,6 +495,7 @@ impl Recording {
                 };
                 match kind {
                     source::MUTATION => self.read_mutation(event)?,
+                    source::STYLE_SHEET_RULE => self.read_style_sheet_rule(event)?,
                     source::MOUSE_INTERACTION => match Mouse::from_data(&small()) {
                         Some(mouse) => Reading::Signal(Signal::Mouse(mouse)),
                         None => Reading::Malformed("mouse_interaction".into()),
@@ -544,8 +558,15 @@ impl Recording {
         let unpacked;
         let json: &str = match serde_json::from_str::<String>(event.data) {
             Ok(packed) if event.compressed => {
-                unpacked = String::from_utf8(self.unpack(&packed)?)
-                    .map_err(|_| DecodeError::NotUtf8("compressed snapshot"))?;
+                let bytes = match self.unpack(&packed) {
+                    Ok(bytes) => bytes,
+                    Err(error @ DecodeError::TooLarge { .. }) => return Err(error),
+                    Err(_) => return Ok(Reading::Malformed("full_snapshot".into())),
+                };
+                unpacked = match String::from_utf8(bytes) {
+                    Ok(text) => text,
+                    Err(_) => return Ok(Reading::Malformed("full_snapshot".into())),
+                };
                 &unpacked
             }
             _ => event.data,
@@ -573,23 +594,66 @@ impl Recording {
             return Ok(Reading::Malformed("mutation".into()));
         };
         Ok(
-            match data.resolve(event.compressed, |packed| self.unpack(packed))? {
-                Some(mutation) => Reading::Signal(Signal::Mutation(mutation)),
-                None => Reading::Malformed("mutation".into()),
+            match data.resolve(event.compressed, |packed| self.unpack(packed)) {
+                Ok(Some(mutation)) => Reading::Signal(Signal::Mutation(mutation)),
+                Err(error @ DecodeError::TooLarge { .. }) => return Err(error),
+                Ok(None) | Err(_) => Reading::Malformed("mutation".into()),
             },
         )
     }
 
+    fn read_style_sheet_rule(&self, event: &EventRef<'_>) -> Result<Reading> {
+        #[derive(Deserialize)]
+        struct Fields<'a> {
+            #[serde(borrow, default)]
+            adds: Option<&'a RawValue>,
+            #[serde(borrow, default)]
+            removes: Option<&'a RawValue>,
+        }
+        let malformed = || Reading::Malformed("style_sheet_rule".into());
+        let Ok(fields) = parse_borrowed::<Fields<'_>>(event.data) else {
+            return Ok(malformed());
+        };
+        for field in [fields.adds, fields.removes].into_iter().flatten() {
+            if field.get().starts_with('[') {
+                continue;
+            }
+            if !event.compressed {
+                return Ok(malformed());
+            }
+            let Ok(packed) = serde_json::from_str::<String>(field.get()) else {
+                return Ok(malformed());
+            };
+            match self.unpack(&packed) {
+                Ok(json) if parse_deep::<Vec<serde::de::IgnoredAny>>(&json).is_ok() => {}
+                Err(error @ DecodeError::TooLarge { .. }) => return Err(error),
+                _ => return Ok(malformed()),
+            }
+        }
+        Ok(Reading::Uninterpreted("style_sheet_rule".into()))
+    }
+
     /// An event's data as JSON with posthog-js compression undone, for recording artifacts.
+    /// Malformed packed events retain their raw data, which remains malformed after a roundtrip.
     pub fn expanded_data(&self, event: &EventRef<'_>) -> Result<String> {
+        match self.expand_data(event) {
+            Ok(data) => Ok(data),
+            Err(error @ DecodeError::TooLarge { .. }) => Err(error),
+            Err(_) => Ok(event.data.to_owned()),
+        }
+    }
+
+    fn expand_data(&self, event: &EventRef<'_>) -> Result<String> {
         if !event.compressed {
             return Ok(event.data.to_owned());
         }
         if event.kind == rrweb::FULL_SNAPSHOT
             && let Ok(packed) = serde_json::from_str::<String>(event.data)
         {
-            return String::from_utf8(self.unpack(&packed)?)
-                .map_err(|_| DecodeError::NotUtf8("compressed snapshot"));
+            let json = String::from_utf8(self.unpack(&packed)?)
+                .map_err(|_| DecodeError::NotUtf8("compressed snapshot"))?;
+            parse_borrowed::<&RawValue>(&json).map_err(DecodeError::json("compressed snapshot"))?;
+            return Ok(json);
         }
         let mut data: Value =
             serde_json::from_str(event.data).map_err(DecodeError::json("event data"))?;
@@ -715,11 +779,13 @@ fn index_decoded(indexer: &mut Indexer<'_>) -> Result<()> {
         }
     }
     // Line-delimited: decoded events carry `win`; anything else is PostHog snapshot lines.
-    let first_line = text.lines().next().unwrap_or_default();
-    parse_borrowed::<serde::de::IgnoredAny>(first_line)
-        .map_err(DecodeError::json("recording line"))?;
-    if !has_win(first_line) {
-        return posthog::index_lines(indexer);
+    // A bad first snapshot line must not abort inspection of the lines that follow it.
+    let first_valid = text
+        .lines()
+        .find(|line| parse_borrowed::<serde::de::IgnoredAny>(line).is_ok());
+    if first_valid.is_none_or(|line| !has_win(line)) {
+        posthog::index_lines(indexer);
+        return Ok(());
     }
     for (number, line) in text
         .lines()

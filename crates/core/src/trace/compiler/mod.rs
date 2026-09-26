@@ -39,17 +39,22 @@ const MAX_NAMED_KINDS: usize = 50;
 
 /// Compile a recording (sorted by timestamp) into a trace for one app of the vocabulary.
 ///
-/// Errors only for corrupt or oversized compressed content; events with unexpected shapes are
-/// skipped and counted in [`Coverage::malformed`].
+/// Only an exhausted input budget is fatal; malformed events and snapshot lines are counted.
 pub fn compile(
     recording: &Recording,
     matcher: &Matcher<'_>,
     app: &str,
 ) -> Result<Compilation, DecodeError> {
+    let mut coverage = Coverage::default();
+    let skipped = recording.malformed_snapshot_lines();
+    if skipped != 0 {
+        coverage.events += skipped;
+        coverage.malformed.insert("snapshot_line".into(), skipped);
+    }
     let Some(first) = recording.events().next() else {
         return Ok(Compilation {
             actions: Vec::new(),
-            coverage: Coverage::default(),
+            coverage,
         });
     };
     let mut compiler = Compiler {
@@ -63,7 +68,7 @@ pub fn compile(
         tabs: IndexMap::new(),
         actions: Vec::new(),
         folds: Vec::new(),
-        coverage: Coverage::default(),
+        coverage,
     };
     // Events PostHog stored twice: identical to another at the same timestamp in the same tab.
     let mut same_time: Vec<EventRef<'_>> = Vec::new();

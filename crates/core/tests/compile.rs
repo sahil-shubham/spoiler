@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 use spoiler_core::{
+    artifact::{RecordingArtifact, RecordingSource},
     recording::{DecodeError, Event, Limits, Reading, Recording, decode_with, rrweb::Signal},
     replay::Mirror,
     time::{Millis, Timestamp},
@@ -230,6 +231,148 @@ fn bare_snapshot_events_take_their_tab_from_window_id_only() {
             .unwrap();
     let tabs: Vec<&str> = recording.events().map(|e| e.win).collect();
     assert_eq!(tabs, ["tab", "other"]);
+}
+
+#[test]
+fn invalid_snapshot_line_does_not_discard_neighboring_actions() {
+    let body = [
+        r#"["tab", {"type": 3, "timestamp": "#.to_owned(),
+        json!(["tab", { "type": 2, "timestamp": 1, "data": page("Save") }]).to_string(),
+        r#"["tab", {"type": 3, "timestamp": "#.to_owned(),
+        json!(["tab", { "type": 3, "timestamp": 2, "data": click(3) }]).to_string(),
+    ]
+    .join("\n");
+    let decoded = decode_with(body.as_bytes(), Limits::default()).unwrap();
+    let recording = Recording::from_snapshot_bodies(&[body], Limits::default()).unwrap();
+    let vocabulary = vocabulary();
+    let compiled = compile(&recording, &Matcher::new(&vocabulary), "demo").unwrap();
+    assert_eq!(compiled.coverage.malformed["snapshot_line"], 2);
+    assert_eq!(compiled.coverage.events, 4);
+    assert_eq!(compiled.actions.len(), 1);
+    assert_eq!(
+        compiled.actions[0].target().as_deref(),
+        Some("button \"Save\"")
+    );
+    assert_eq!(decoded.malformed_snapshot_lines(), 2);
+    let empty = Recording::from_snapshot_bodies(&["{".into()], Limits::default()).unwrap();
+    let coverage = compile(&empty, &Matcher::new(&vocabulary), "demo")
+        .unwrap()
+        .coverage;
+    assert_eq!(coverage.events, 1);
+    assert_eq!(coverage.malformed["snapshot_line"], 1);
+}
+
+#[test]
+fn corrupt_compressed_fields_count_as_malformed_without_losing_valid_events() {
+    let bad_gzip: String = [0x1f, 0x8b, 0x00].into_iter().map(char::from).collect();
+    let bad_zstd: String = [0x28, 0xb5, 0x2f, 0xfd, 0x00]
+        .into_iter()
+        .map(char::from)
+        .collect();
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(b"not json").unwrap();
+    let bad_json: String = gzip.finish().unwrap().into_iter().map(char::from).collect();
+    let body = [
+        json!(["tab", { "type": 2, "timestamp": 1, "cv": "2024-10", "data": bad_gzip }]),
+        json!(["tab", { "type": 2, "timestamp": 2, "data": page("Save") }]),
+        json!(["tab", { "type": 3, "timestamp": 3, "cv": "2024-10", "data": { "source": 0, "adds": bad_zstd } }]),
+        json!(["tab", { "type": 3, "timestamp": 4, "cv": "2024-10", "data": { "source": 0, "texts": bad_json } }]),
+        json!(["tab", { "type": 3, "timestamp": 4.5, "cv": "2024-10", "data": { "source": 8, "adds": bad_zstd } }]),
+        json!(["tab", { "type": 3, "timestamp": 5, "data": click(3) }]),
+    ]
+    .into_iter()
+    .map(|line| line.to_string())
+    .collect::<Vec<_>>()
+    .join("\n");
+    let recording = Recording::from_snapshot_bodies(&[body], Limits::default()).unwrap();
+    let vocabulary = vocabulary();
+    let compiled = compile(&recording, &Matcher::new(&vocabulary), "demo").unwrap();
+    assert_eq!(compiled.coverage.malformed["full_snapshot"], 1);
+    assert_eq!(compiled.coverage.malformed["mutation"], 2);
+    assert_eq!(compiled.coverage.malformed["style_sheet_rule"], 1);
+    assert_eq!(compiled.actions.len(), 1);
+    assert_eq!(
+        compiled.actions[0].target().as_deref(),
+        Some("button \"Save\"")
+    );
+    // Serializing the fetched recording must not fail merely because a field is corrupt.
+    let artifact = RecordingArtifact::new(
+        RecordingSource::File {
+            sha256: String::new(),
+        },
+        recording,
+    );
+    let bytes = serde_json::to_vec(&artifact).unwrap();
+    let roundtrip = decode_with(&bytes, Limits::default()).unwrap();
+    let roundtrip = compile(&roundtrip, &Matcher::new(&vocabulary), "demo").unwrap();
+    assert_eq!(roundtrip.coverage.malformed, compiled.coverage.malformed);
+    assert_eq!(roundtrip.actions.len(), 1);
+}
+
+#[test]
+fn unknown_compression_versions_do_not_decompress_fields() {
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(&serde_json::to_vec(&page("Never decode")).unwrap())
+        .unwrap();
+    let packed_full: String = gzip.finish().unwrap().into_iter().map(char::from).collect();
+    let packed_mutation: String = zstd::encode_all(b"[]".as_slice(), 0)
+        .unwrap()
+        .into_iter()
+        .map(char::from)
+        .collect();
+    let body = [
+        json!(["tab", { "type": 2, "timestamp": 1, "cv": "future", "data": packed_full }]),
+        json!(["tab", { "type": 3, "timestamp": 2, "cv": null, "data": { "source": 0, "adds": packed_mutation } }]),
+        json!(["tab", { "type": 3, "timestamp": 2.5, "cv": "future", "data": { "source": 8, "adds": packed_mutation } }]),
+        json!(["tab", { "type": 2, "timestamp": 3, "data": page("Save") }]),
+        json!(["tab", { "type": 3, "timestamp": 4, "data": click(3) }]),
+    ]
+    .into_iter()
+    .map(|line| line.to_string())
+    .collect::<Vec<_>>()
+    .join("\n");
+    let recording = Recording::from_snapshot_bodies(&[body], Limits::default()).unwrap();
+    let vocabulary = vocabulary();
+    let compiled = compile(&recording, &Matcher::new(&vocabulary), "demo").unwrap();
+    assert_eq!(compiled.coverage.malformed["full_snapshot"], 1);
+    assert_eq!(compiled.coverage.malformed["mutation"], 1);
+    assert_eq!(compiled.coverage.malformed["style_sheet_rule"], 1);
+    assert_eq!(
+        compiled.actions[0].target().as_deref(),
+        Some("button \"Save\"")
+    );
+}
+
+#[test]
+fn falsey_window_ids_coalesce_across_tuple_batch_and_bare_events() {
+    let event = |timestamp| json!({ "type": 4, "timestamp": timestamp, "data": { "href": "https://example.test/page" } });
+    let lines = [
+        json!([null, event(1)]),
+        json!(["", event(2)]),
+        json!({ "data": [event(3)] }),
+        json!({ "window_id": null, "data": [event(4)] }),
+        event(5),
+        json!({ "windowId": "", "type": 4, "timestamp": 6, "data": { "href": "https://example.test/page" } }),
+        json!([9, event(7)]),
+        json!({ "windowId": 9, "data": [event(8)] }),
+        json!({ "windowId": 9, "type": 4, "timestamp": 9, "data": { "href": "https://example.test/page" } }),
+    ];
+    let recording = Recording::from_snapshot_bodies(
+        &[lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")],
+        Limits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        recording
+            .events()
+            .map(|event| event.win)
+            .collect::<Vec<_>>(),
+        ["", "", "", "", "", "", "9", "9", "9"]
+    );
 }
 
 #[test]

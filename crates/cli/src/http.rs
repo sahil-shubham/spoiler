@@ -1,6 +1,5 @@
-//! One bounded HTTP client for every upstream. No retries here: the caller's scheduler owns
-//! retry policy and aggregate rate admission across invocations; failures say whether retrying
-//! can help.
+//! One bounded HTTP client for every upstream. Callers decide retry policy and aggregate
+//! rate admission across invocations; failures say whether retrying can help.
 
 use anyhow::{Context, Result, ensure};
 use reqwest::blocking::Client;
@@ -54,8 +53,9 @@ impl Http {
         self.send(url, token, None, MAX_JSON_RESPONSE_BYTES)
     }
 
-    pub fn get_limited(&self, url: &str, token: &str, max_bytes: u64) -> Result<String> {
-        self.send(url, token, None, max_bytes)
+    /// PostHog's compressed snapshot replies are binary, not UTF-8 JSONL.
+    pub fn get_bytes_limited(&self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>> {
+        self.send_bytes(url, token, None, max_bytes)
     }
 
     pub fn post_json(&self, url: &str, token: &str, body: &Value) -> Result<String> {
@@ -63,6 +63,17 @@ impl Http {
     }
 
     fn send(&self, url: &str, token: &str, body: Option<&Value>, max_bytes: u64) -> Result<String> {
+        String::from_utf8(self.send_bytes(url, token, body, max_bytes)?)
+            .context("upstream response is not UTF-8")
+    }
+
+    fn send_bytes(
+        &self,
+        url: &str,
+        token: &str,
+        body: Option<&Value>,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>> {
         require_secure(url)?;
         let request = match body {
             Some(body) => self.client.post(url).json(body),
@@ -86,12 +97,12 @@ impl Http {
             }
             .into());
         }
-        read_limited(response, max_bytes).context("reading upstream response")
+        read_limited_bytes(response, max_bytes).context("reading upstream response")
     }
 }
 
 /// Read at most one byte beyond the cap, so the limit is checked before retaining a full body.
-fn read_limited(reader: impl Read, max_bytes: u64) -> Result<String> {
+fn read_limited_bytes(reader: impl Read, max_bytes: u64) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader
         .take(max_bytes.saturating_add(1))
@@ -100,7 +111,13 @@ fn read_limited(reader: impl Read, max_bytes: u64) -> Result<String> {
         (bytes.len() as u64) <= max_bytes,
         "upstream response exceeds {max_bytes} bytes"
     );
-    String::from_utf8(bytes).context("upstream response is not UTF-8")
+    Ok(bytes)
+}
+
+#[cfg(test)]
+fn read_limited(reader: impl Read, max_bytes: u64) -> Result<String> {
+    String::from_utf8(read_limited_bytes(reader, max_bytes)?)
+        .context("upstream response is not UTF-8")
 }
 
 /// Credentials only travel over HTTPS; plain HTTP is allowed for loopback test servers.
@@ -189,7 +206,7 @@ mod tests {
         });
         let error = Http::new(5)
             .unwrap()
-            .get_limited(&format!("http://{address}/"), "token", 5)
+            .get_bytes_limited(&format!("http://{address}/"), "token", 5)
             .unwrap_err();
         server.join().unwrap();
         assert!(!is_retryable(&error));

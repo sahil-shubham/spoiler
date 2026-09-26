@@ -1,6 +1,6 @@
 //! PostHog: discovering recordings (HogQL) and fetching their snapshots (`blob_v2`).
 
-use crate::http::{Http, credential};
+use crate::http::{Http, UpstreamError, credential};
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
@@ -9,11 +9,14 @@ use spoiler_core::{
     artifact::{Header, Kind, RecordingArtifact, RecordingSource},
     recording::{DecodeError, Limits, Recording},
 };
+use std::time::{Duration, SystemTime};
 
 const TOKEN: &str = "POSTHOG_API_KEY";
-/// The personal-API-key cap on blob keys per snapshot request.
+/// The snapshot API allows at most 20 blob keys in each inclusive range.
 const BLOB_KEYS_PER_REQUEST: usize = 20;
-/// Snapshot requests per fetch, staying under PostHog's 60/minute snapshot throttle.
+/// Per-fetch safety cap, including the source listing, not a rate-limit scheduler. Snapshot
+/// throttles apply to both listing and ranges: free 12/min 60/h, paid 60/min 300/h,
+/// enterprise 100/min 400/h per personal key, across concurrent fetches.
 pub const MAX_SNAPSHOT_REQUESTS: usize = 59;
 pub const MAX_PAGE_SIZE: usize = 1000;
 /// Bound outlier ID probes to avoid another full retention scan. A recording with
@@ -250,11 +253,22 @@ pub struct Snapshot<'a> {
     pub project: u64,
     pub session: &'a str,
     pub max_requests: usize,
+    pub max_wait: u64,
     pub limits: Limits,
 }
 
-/// Download a recording. Fails before downloading bodies if it needs more than `max_requests`.
+/// Download a recording. Fails before downloading bodies if the listing plus ranges need more
+/// than `max_requests`. Retries after 429 repeat only the failed request.
 pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> {
+    let token = credential(TOKEN)?;
+    fetch_with_token(http, snapshot, &token)
+}
+
+fn fetch_with_token(
+    http: &Http,
+    snapshot: &Snapshot<'_>,
+    token: &str,
+) -> Result<RecordingArtifact> {
     ensure!(
         (1..=MAX_SNAPSHOT_REQUESTS).contains(&snapshot.max_requests),
         "max requests must be between 1 and {MAX_SNAPSHOT_REQUESTS}"
@@ -265,7 +279,7 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     ensure!(valid_id, "invalid recording id");
-    let token = credential(TOKEN)?;
+    let mut waited = Duration::ZERO;
     let base = format!(
         "{}/api/environments/{}/session_recordings/{}/snapshots",
         snapshot.host.trim_end_matches('/'),
@@ -273,7 +287,12 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
         snapshot.session
     );
 
-    let listing: Value = serde_json::from_str(&http.get(&base, &token)?)
+    let mut listing_url = url::Url::parse(&base)?;
+    listing_url.query_pairs_mut().append_pair("blob_v2", "true");
+    let listing: Value =
+        serde_json::from_str(&get_with_retry(snapshot.max_wait, &mut waited, || {
+            http.get(listing_url.as_str(), token)
+        })?)
         .context("snapshot source listing is not JSON")?;
     let mut blob_keys = Vec::new();
     for source in listing["sources"]
@@ -290,15 +309,16 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
             .context("snapshot source has no blob key")?;
         blob_keys.push(key.to_owned());
     }
-    let requests = blob_keys.len().div_ceil(BLOB_KEYS_PER_REQUEST);
+    let requests = 1 + blob_keys.len().div_ceil(BLOB_KEYS_PER_REQUEST);
     ensure!(
         requests <= snapshot.max_requests,
-        "recording needs {requests} snapshot requests; --max-requests allows {}",
+        "recording needs {requests} snapshot requests (listing and ranges); --max-requests allows {}",
         snapshot.max_requests
     );
 
-    let mut bodies = Vec::with_capacity(requests);
+    let mut bodies = Vec::with_capacity(requests - 1);
     let mut downloaded = 0_u64;
+    let mut wire_downloaded = 0_u64;
     for chunk in blob_keys.chunks(BLOB_KEYS_PER_REQUEST) {
         let (Some(first), Some(last)) = (chunk.first(), chunk.last()) else {
             continue;
@@ -307,7 +327,8 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
         url.query_pairs_mut()
             .append_pair("source", "blob_v2")
             .append_pair("start_blob_key", first)
-            .append_pair("end_blob_key", last);
+            .append_pair("end_blob_key", last)
+            .append_pair("decompress", "false");
         let separator = u64::from(!bodies.is_empty());
         let remaining = snapshot
             .limits
@@ -317,7 +338,18 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
             .ok_or(DecodeError::TooLarge {
                 max_bytes: snapshot.limits.max_bytes,
             })?;
-        let body = http.get_limited(url.as_str(), &token, remaining)?;
+        let wire_remaining = snapshot
+            .limits
+            .max_bytes
+            .checked_sub(wire_downloaded)
+            .ok_or(DecodeError::TooLarge {
+                max_bytes: snapshot.limits.max_bytes,
+            })?;
+        let wire = get_with_retry(snapshot.max_wait, &mut waited, || {
+            http.get_bytes_limited(url.as_str(), token, wire_remaining)
+        })?;
+        wire_downloaded += wire.len() as u64;
+        let body = decode_snappy_blocks(&wire, remaining, snapshot.limits.max_bytes)?;
         downloaded += separator + body.len() as u64;
         bodies.push(body);
     }
@@ -333,10 +365,312 @@ pub fn fetch(http: &Http, snapshot: &Snapshot<'_>) -> Result<RecordingArtifact> 
     ))
 }
 
+fn get_with_retry<T>(
+    max_wait: u64,
+    waited: &mut Duration,
+    mut request: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    loop {
+        match request() {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                let Some(upstream) = error.downcast_ref::<UpstreamError>() else {
+                    return Err(error);
+                };
+                let Some(delay) = upstream
+                    .retry_after
+                    .as_deref()
+                    .filter(|_| upstream.status == 429 && max_wait > 0)
+                    .and_then(retry_delay)
+                else {
+                    return Err(error);
+                };
+                // A zero-delay 429 must not spin without spending any allowance.
+                let delay = delay.max(Duration::from_millis(100));
+                if delay > Duration::from_secs(max_wait).saturating_sub(*waited) {
+                    return Err(error);
+                }
+                std::thread::sleep(delay);
+                *waited += delay;
+            }
+        }
+    }
+}
+
+fn retry_delay(value: &str) -> Option<Duration> {
+    value
+        .parse::<u64>()
+        .ok()
+        .map(Duration::from_secs)
+        .or_else(|| {
+            httpdate::parse_http_date(value)
+                .ok()
+                .map(|until| until.duration_since(SystemTime::now()).unwrap_or_default())
+        })
+}
+
+/// PostHog's `decompress=false` is a sequence of big-endian length-prefixed raw Snappy blocks.
+/// Reject other formats, rather than silently interpreting corrupt binary as snapshot lines.
+fn decode_snappy_blocks(wire: &[u8], max_bytes: u64, recording_max_bytes: u64) -> Result<String> {
+    ensure!(
+        !wire.is_empty(),
+        "snapshot body is not valid length-prefixed Snappy: empty body"
+    );
+    let mut rest = wire;
+    let mut output = Vec::new();
+    let mut decoder = snap::raw::Decoder::new();
+    while !rest.is_empty() {
+        ensure!(
+            rest.len() >= 4,
+            "snapshot body is not valid length-prefixed Snappy: truncated block header"
+        );
+        let length = u32::from_be_bytes(rest[..4].try_into()?) as usize;
+        rest = &rest[4..];
+        ensure!(
+            length > 0 && length <= rest.len(),
+            "snapshot body is not valid length-prefixed Snappy: invalid block length"
+        );
+        let (block, remaining) = rest.split_at(length);
+        rest = remaining;
+        let decoded = snap::raw::decompress_len(block)
+            .context("snapshot body is not valid length-prefixed Snappy: invalid block")?;
+        let separator = usize::from(!output.is_empty());
+        let new_size = output
+            .len()
+            .checked_add(separator)
+            .and_then(|bytes| bytes.checked_add(decoded))
+            .ok_or(DecodeError::TooLarge {
+                max_bytes: recording_max_bytes,
+            })?;
+        if new_size as u64 > max_bytes {
+            return Err(DecodeError::TooLarge {
+                max_bytes: recording_max_bytes,
+            }
+            .into());
+        }
+        output.reserve_exact(new_size - output.len());
+        if separator != 0 {
+            output.push(b'\n');
+        }
+        let start = output.len();
+        output.resize(new_size, 0);
+        let written = decoder
+            .decompress(block, &mut output[start..])
+            .context("snapshot body is not valid length-prefixed Snappy: corrupt block")?;
+        ensure!(
+            written == decoded,
+            "snapshot body is not valid length-prefixed Snappy: inconsistent block size"
+        );
+    }
+    String::from_utf8(output).context("snapshot body is not UTF-8 JSONL")
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+    };
+
+    fn framed(lines: &[&str]) -> Vec<u8> {
+        let mut wire = Vec::new();
+        for line in lines {
+            let block = snap::raw::Encoder::new()
+                .compress_vec(line.as_bytes())
+                .unwrap();
+            wire.extend_from_slice(&(block.len() as u32).to_be_bytes());
+            wire.extend_from_slice(&block);
+        }
+        wire
+    }
+
+    #[test]
+    fn framed_snappy_joins_blocks_and_rejects_oversized_or_invalid_frames() {
+        let wire = framed(&["first", "second"]);
+        assert_eq!(
+            decode_snappy_blocks(&wire, 12, 12).unwrap(),
+            "first\nsecond"
+        );
+        assert!(matches!(
+            decode_snappy_blocks(&wire, 11, 11)
+                .unwrap_err()
+                .downcast_ref::<DecodeError>(),
+            Some(DecodeError::TooLarge { max_bytes: 11 })
+        ));
+
+        let compressed = snap::raw::Encoder::new()
+            .compress_vec(&vec![b'a'; 128 << 10])
+            .unwrap();
+        let prefix = (1..=5)
+            .find(|&n| snap::raw::decompress_len(&compressed[..n]).ok() == Some(128 << 10))
+            .unwrap();
+        let mut incomplete = Vec::new();
+        incomplete.extend_from_slice(&(prefix as u32).to_be_bytes());
+        incomplete.extend_from_slice(&compressed[..prefix]);
+        // Even an incomplete block advertises its size: reject before allocating or decoding.
+        assert!(matches!(
+            decode_snappy_blocks(&incomplete, 1024, 1024)
+                .unwrap_err()
+                .downcast_ref::<DecodeError>(),
+            Some(DecodeError::TooLarge { max_bytes: 1024 })
+        ));
+        let error = decode_snappy_blocks(&[0, 0, 0, 4, 1], 1024, 1024).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("not valid length-prefixed Snappy")
+        );
+        assert!(decode_snappy_blocks(&[], 1024, 1024).is_err());
+    }
+
+    #[test]
+    fn rate_limit_retry_keeps_downloaded_ranges_and_retries_only_the_throttled_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            listener.set_nonblocking(true).unwrap();
+            let listing = json!({ "sources": (0..21).map(|key| json!({
+                "source": "blob_v2", "blob_key": format!("k{key:02}")
+            })).collect::<Vec<_>>() })
+            .to_string();
+            let first = framed(&[
+                &json!(["tab", { "type": 4, "timestamp": 1, "data": { "href": "https://example.test/one" } }]).to_string(),
+                &json!(["tab", { "type": 4, "timestamp": 2, "data": { "href": "https://example.test/two" } }]).to_string(),
+            ]);
+            let second = framed(&[
+                &json!(["tab", { "type": 4, "timestamp": 3, "data": { "href": "https://example.test/three" } }]).to_string(),
+            ]);
+            let mut starts = Vec::new();
+            for attempt in 0..4 {
+                let Some((mut stream, _)) = (0..400).find_map(|_| match listener.accept() {
+                    Ok(connection) => Some(connection),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                        None
+                    }
+                    Err(error) => panic!("accepting loopback request: {error}"),
+                }) else {
+                    break;
+                };
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap() == 1 {
+                    request.push(byte[0]);
+                }
+                let request = String::from_utf8(request).unwrap();
+                let path = request.split_whitespace().nth(1).unwrap();
+                let url = url::Url::parse(&format!("http://localhost{path}")).unwrap();
+                let pairs = url
+                    .query_pairs()
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                starts.push(pairs.get("start_blob_key").map(|key| key.to_string()));
+                let (status, body, retry_after) = match attempt {
+                    0 => {
+                        assert_eq!(pairs.get("blob_v2").map(|v| v.as_ref()), Some("true"));
+                        ("200 OK", listing.as_bytes(), "")
+                    }
+                    1 => {
+                        assert_eq!(pairs.get("end_blob_key").map(|v| v.as_ref()), Some("k19"));
+                        assert_eq!(pairs.get("decompress").map(|v| v.as_ref()), Some("false"));
+                        ("200 OK", first.as_slice(), "")
+                    }
+                    2 | 3 => {
+                        assert_eq!(pairs.get("end_blob_key").map(|v| v.as_ref()), Some("k20"));
+                        assert_eq!(pairs.get("decompress").map(|v| v.as_ref()), Some("false"));
+                        if attempt == 2 {
+                            (
+                                "429 Too Many Requests",
+                                b"".as_slice(),
+                                "Retry-After: 1\r\n",
+                            )
+                        } else {
+                            ("200 OK", second.as_slice(), "")
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{retry_after}\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                stream.write_all(body).unwrap();
+            }
+            starts
+        });
+        let artifact = fetch_with_token(
+            &Http::new(3).unwrap(),
+            &Snapshot {
+                host: &host,
+                project: 7,
+                session: "session",
+                max_requests: 3,
+                max_wait: 1,
+                limits: Limits { max_bytes: 1024 },
+            },
+            "token",
+        );
+        let starts = server.join().unwrap();
+        let artifact = artifact.unwrap();
+        assert_eq!(artifact.events.len(), 3);
+        assert_eq!(
+            artifact
+                .events
+                .events()
+                .map(|event| event.timestamp.0)
+                .collect::<Vec<_>>(),
+            [1.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            starts,
+            [
+                None,
+                Some("k00".into()),
+                Some("k20".into()),
+                Some("k20".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn retry_after_longer_than_wait_budget_preserves_retryable_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut byte = [0];
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap() == 1 {
+                request.push(byte[0]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 2\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let error = fetch_with_token(
+            &Http::new(3).unwrap(),
+            &Snapshot {
+                host: &format!("http://{address}"),
+                project: 7,
+                session: "session",
+                max_requests: 3,
+                max_wait: 1,
+                limits: Limits::default(),
+            },
+            "token",
+        )
+        .err()
+        .unwrap();
+        server.join().unwrap();
+        assert!(crate::http::is_retryable(&error));
+        assert!(error.to_string().contains("retry after 2"));
+    }
 
     fn cursor() -> Cursor {
         Cursor {

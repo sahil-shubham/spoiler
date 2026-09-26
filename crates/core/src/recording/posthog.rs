@@ -3,7 +3,7 @@
 //! Line shapes, as the PostHog player accepts them: `[windowId, event]`,
 //! `{window_id | windowId, data: [events]}`, and a bare event carrying `windowId`.
 
-use super::{DecodeError, Indexer, Result, is_object, parse_borrowed, rrweb};
+use super::{Indexer, is_object, parse_borrowed};
 use crate::text::js_string;
 use crate::time::Timestamp;
 use serde::Deserialize;
@@ -27,52 +27,88 @@ struct SnapshotObject<'a> {
     timestamp: Option<f64>,
     #[serde(borrow, default)]
     data: Option<&'a RawValue>,
-    /// posthog-js field compression (`cv: "2024-10"`), by presence.
-    #[serde(default, deserialize_with = "rrweb::present_field")]
-    cv: bool,
+    /// Only posthog-js `cv: "2024-10"` uses packed fields.
+    #[serde(borrow, default)]
+    cv: Option<&'a RawValue>,
     #[serde(borrow, default)]
     window_id: Option<&'a RawValue>,
     #[serde(borrow, rename = "windowId", default)]
     window_id_camel: Option<&'a RawValue>,
 }
 
-/// JS `String(value)` of a raw JSON value; a missing value is `undefined`.
+/// PostHog coalesces missing, null and empty window IDs into its default tab.
 fn window_name(raw: Option<&RawValue>) -> String {
-    match raw {
-        Some(raw) => js_string(&serde_json::from_str(raw.get()).unwrap_or(Value::Null)),
-        None => "undefined".into(),
-    }
-}
-
-/// Index one event object; entries that are not events (no numeric type/timestamp) are skipped.
-fn index_event(indexer: &mut Indexer<'_>, raw: &RawValue, win: &str) -> Result<()> {
-    if !is_object(raw.get()) {
-        return Ok(());
-    }
-    let event: SnapshotObject<'_> =
-        parse_borrowed(raw.get()).map_err(DecodeError::json("snapshot event"))?;
-    let (Some(kind), Some(timestamp)) = (event.kind, event.timestamp) else {
-        return Ok(());
+    let Some(raw) = raw else {
+        return String::new();
     };
-    let kind = u32::try_from(kind).map_err(|_| DecodeError::EventType(kind))?;
-    indexer.push(kind, Timestamp(timestamp), win, event.data, event.cv);
-    Ok(())
+    let json = raw.get();
+    if json == "null" || json == "\"\"" {
+        return String::new();
+    }
+    let value = serde_json::from_str(json).unwrap_or(Value::Null);
+    match value {
+        Value::Null | Value::Bool(false) => String::new(),
+        Value::String(win) => win,
+        other => js_string(&other),
+    }
 }
 
-pub(super) fn index_lines(indexer: &mut Indexer<'_>) -> Result<()> {
+fn compressed_version(raw: Option<&RawValue>) -> bool {
+    let Some(raw) = raw else {
+        return false;
+    };
+    let json = raw.get();
+    match serde_json::from_str::<&str>(json) {
+        Ok(version) => version == "2024-10",
+        // Escaped JSON strings cannot borrow from the input.
+        Err(_) => serde_json::from_str::<String>(json).is_ok_and(|version| version == "2024-10"),
+    }
+}
+
+/// PostHog ignores events that cannot be interpreted, without dropping their neighbors.
+fn index_event(indexer: &mut Indexer<'_>, raw: &RawValue, win: &str) {
+    if !is_object(raw.get()) {
+        return;
+    }
+    let Ok(event) = parse_borrowed::<SnapshotObject<'_>>(raw.get()) else {
+        indexer.malformed_snapshot_lines += 1;
+        return;
+    };
+    let (Some(kind), Some(timestamp)) = (event.kind, event.timestamp) else {
+        return;
+    };
+    let Ok(kind) = u32::try_from(kind) else {
+        indexer.malformed_snapshot_lines += 1;
+        return;
+    };
+    indexer.push(
+        kind,
+        Timestamp(timestamp),
+        win,
+        event.data,
+        compressed_version(event.cv),
+    );
+}
+
+pub(super) fn index_lines(indexer: &mut Indexer<'_>) {
     let text = indexer.text;
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let trimmed = line.trim_start();
         if trimmed.starts_with('[') {
-            let tuple: Vec<&RawValue> =
-                parse_borrowed(line).map_err(DecodeError::json("snapshot line"))?;
-            let win = window_name(tuple.first().copied());
+            let Ok(tuple) = parse_borrowed::<Vec<&RawValue>>(line) else {
+                indexer.malformed_snapshot_lines += 1;
+                continue;
+            };
             if let Some(event) = tuple.get(1) {
-                index_event(indexer, event, &win)?;
+                index_event(indexer, event, &window_name(tuple.first().copied()));
+            } else {
+                indexer.malformed_snapshot_lines += 1;
             }
         } else if trimmed.starts_with('{') {
-            let object: SnapshotObject<'_> =
-                parse_borrowed(line).map_err(DecodeError::json("snapshot line"))?;
+            let Ok(object) = parse_borrowed::<SnapshotObject<'_>>(line) else {
+                indexer.malformed_snapshot_lines += 1;
+                continue;
+            };
             let batch = object.data.filter(|data| data.get().starts_with('['));
             match batch {
                 Some(batch) => {
@@ -82,28 +118,28 @@ pub(super) fn index_lines(indexer: &mut Indexer<'_>) -> Result<()> {
                         .filter(|id| id.get() != "null")
                         .or(object.window_id_camel);
                     let win = window_name(window);
-                    let events: Vec<&RawValue> =
-                        parse_borrowed(batch.get()).map_err(DecodeError::json("snapshot batch"))?;
+                    let Ok(events) = parse_borrowed::<Vec<&RawValue>>(batch.get()) else {
+                        indexer.malformed_snapshot_lines += 1;
+                        continue;
+                    };
                     for event in events {
-                        index_event(indexer, event, &win)?;
+                        index_event(indexer, event, &win);
                     }
                 }
                 None => {
                     let win = window_name(object.window_id_camel);
-                    let raw: &RawValue =
-                        parse_borrowed(line).map_err(DecodeError::json("snapshot line"))?;
-                    index_event(indexer, raw, &win)?;
+                    if let Ok(raw) = parse_borrowed::<&RawValue>(line) {
+                        index_event(indexer, raw, &win);
+                    } else {
+                        indexer.malformed_snapshot_lines += 1;
+                    }
                 }
             }
         } else {
-            // Validate it is JSON at all, then reject its shape.
-            parse_borrowed::<serde::de::IgnoredAny>(line)
-                .map_err(DecodeError::json("snapshot line"))?;
-            return Err(DecodeError::UnrecognizedLine);
+            indexer.malformed_snapshot_lines += 1;
         }
     }
     indexer
         .entries
         .sort_by(|a, b| crate::time::chronological(&a.timestamp, &b.timestamp));
-    Ok(())
 }
