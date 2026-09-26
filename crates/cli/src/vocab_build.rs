@@ -67,7 +67,7 @@ pub fn build(inputs: &Build, model: Option<&OpenRouter>) -> Result<VocabularySna
                 "usage": completion.usage,
                 "prompt": build::prompt_id(),
             });
-            (build::parse_answer(&completion.content)?, generator)
+            (build::parse_answer(&completion.into_content()?)?, generator)
         }
         (None, None) => anyhow::bail!("--model is required without --candidate"),
     };

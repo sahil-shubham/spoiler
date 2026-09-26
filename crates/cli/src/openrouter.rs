@@ -44,9 +44,24 @@ pub struct Usage {
 }
 
 pub struct Completion {
-    pub content: String,
+    /// Absent when the provider answered without content (its `finish_reason` says why).
+    pub content: Option<String>,
+    pub finish_reason: Option<String>,
     pub model: Option<String>,
     pub usage: Usage,
+}
+
+impl Completion {
+    /// The content, or an error naming why there is none.
+    pub fn into_content(self) -> Result<String> {
+        match self.content {
+            Some(content) => Ok(content),
+            None => bail!(
+                "completion has no content (finish reason: {})",
+                self.finish_reason.as_deref().unwrap_or("none given")
+            ),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -60,6 +75,8 @@ struct Response {
 #[derive(Deserialize)]
 struct Choice {
     message: ChoiceMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -99,14 +116,15 @@ impl OpenRouter {
         let text = self.http.post_json(&url, &self.token, &body)?;
         let response: Response =
             serde_json::from_str(&text).context("completion response has an unexpected shape")?;
-        let content = response
+        let (content, finish_reason) = response
             .choices
             .into_iter()
             .next()
-            .and_then(|choice| choice.message.content)
-            .context("completion has no content")?;
+            .map(|choice| (choice.message.content, choice.finish_reason))
+            .unwrap_or_default();
         Ok(Completion {
-            content,
+            content: content.filter(|content| !content.trim().is_empty()),
+            finish_reason,
             model: response.model,
             usage: response.usage.unwrap_or_default(),
         })
@@ -137,10 +155,20 @@ impl OpenRouter {
             if let Some(model) = completion.model {
                 usage.model = model;
             }
-            match analysis::assess(&completion.content, actions, vocabulary) {
+            // An empty answer (a provider hiccup) is asked again as it was; it was still paid for.
+            let Some(content) = completion.content else {
+                if attempt < MAX_ATTEMPTS {
+                    continue;
+                }
+                bail!(
+                    "model gave no answer after {attempt} attempts (finish reason: {})",
+                    completion.finish_reason.as_deref().unwrap_or("none given")
+                );
+            };
+            match analysis::assess(&content, actions, vocabulary) {
                 Assessment::Accepted { summary, check } => return Ok((summary, check, usage)),
                 Assessment::Rejected { reason } if attempt < MAX_ATTEMPTS => {
-                    messages.push(Message::new(Role::Assistant, completion.content));
+                    messages.push(Message::new(Role::Assistant, content));
                     messages.push(Message::new(Role::User, Assessment::feedback(&reason)));
                 }
                 Assessment::Rejected { reason } => {
@@ -149,5 +177,97 @@ impl OpenRouter {
             }
         }
         bail!("no model attempts were made")
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use spoiler_core::{recording, trace, vocab::Matcher};
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        path::Path,
+    };
+
+    /// Answer each request with the next body, closing the connection after each.
+    fn serve(bodies: Vec<String>) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for body in bodies {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                reader.read_exact(&mut vec![0; length]).unwrap();
+                write!(
+                    reader.get_mut(),
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+        });
+        (url, server)
+    }
+
+    #[test]
+    fn an_empty_answer_is_asked_again_and_still_counted() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let vocabulary =
+            Vocabulary::parse(&std::fs::read(root.join("corpus/vocabulary.yaml")).unwrap())
+                .unwrap();
+        let recording =
+            recording::decode(&std::fs::read(root.join("corpus/click_changes_text.json")).unwrap())
+                .unwrap();
+        let actions = trace::compile(&recording, &Matcher::new(&vocabulary), "demo")
+            .unwrap()
+            .actions;
+        let answer =
+            std::fs::read_to_string(root.join("examples/click_changes_text.response.json"))
+                .unwrap();
+        let completion = |content: Value, prompt_tokens: u64| {
+            json!({
+                "choices": [{ "message": { "content": content }, "finish_reason": "error" }],
+                "model": "test/model",
+                "usage": { "prompt_tokens": prompt_tokens, "completion_tokens": 1, "cost": 0.5 },
+            })
+            .to_string()
+        };
+        let (url, server) = serve(vec![
+            completion(Value::Null, 10),
+            completion(json!(answer), 20),
+        ]);
+        let client = OpenRouter {
+            http: Http::new(5).unwrap(),
+            base_url: url,
+            token: "test".into(),
+            model: "test/model".into(),
+        };
+        let (_, _, usage) = client
+            .narrate(
+                vec![Message::new(Role::User, "trace")],
+                &actions,
+                &vocabulary,
+            )
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(usage.attempts, 2);
+        assert_eq!(
+            usage.tokens_in, 30,
+            "the empty answer's tokens are billed too"
+        );
+        assert_eq!(usage.cost_usd, 1.0);
     }
 }
