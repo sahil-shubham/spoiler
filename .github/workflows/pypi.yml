@@ -37,8 +37,8 @@ jobs:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
-        # glibc distributions, and Alpine/musl.
-        libc: [auto, musllinux_1_2]
+        # glibc 2.28+ (manylinux2014's old aarch64 gcc cannot build ring), and Alpine/musl.
+        libc: [2_28, musllinux_1_2]
     steps:
       - uses: actions/checkout@v4
       - uses: PyO3/maturin-action@v1
@@ -48,7 +48,7 @@ jobs:
           manylinux: ${{ matrix.libc }}
           args: --release --out dist
       - name: Smoke-test the wheel
-        if: matrix.target == 'x86_64' && matrix.libc == 'auto'
+        if: matrix.target == 'x86_64' && matrix.libc == '2_28'
         run: |
           python3 -m venv /tmp/venv
           /tmp/venv/bin/pip install dist/*.whl
