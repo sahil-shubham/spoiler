@@ -4,10 +4,23 @@ Spoiler turns PostHog/rrweb session recordings into evidence you can inspect: it
 
 ## Install
 
-Requires Rust 1.88 or later. Install the CLI from GitHub:
+Prebuilt binaries cover Linux and macOS on x86_64 and arm64. Install from PyPI (there is no Python API; the wheel only puts `spoiler` on PATH):
 
 ```sh
-cargo install --git https://github.com/sahil-shubham/spoiler spoiler
+pip install spoiler    # or: uv tool install spoiler
+```
+
+Or download an archive from [GitHub Releases](https://github.com/sahil-shubham/spoiler/releases); each has a `.sha256` beside it, and the `*-linux-musl` builds are static, so they run on any Linux:
+
+```sh
+curl -fsSL https://github.com/sahil-shubham/spoiler/releases/latest/download/spoiler-aarch64-apple-darwin.tar.gz | tar -xz
+./spoiler-aarch64-apple-darwin/spoiler --version
+```
+
+Or build it from crates.io with Rust 1.88 or later:
+
+```sh
+cargo install spoiler --locked
 ```
 
 Or build from source (the repository pins a Rust toolchain):

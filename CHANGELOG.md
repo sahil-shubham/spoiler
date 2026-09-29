@@ -14,4 +14,4 @@ All notable changes to this project will be documented in this file. The format 
 - `spoiler run`: fetch or read, compile, and narrate every visit with gestures in one step, as one `session` artifact.
 - `-` reads any input path from standard input.
 - Recording discovery pages continue with an opaque `--cursor TOKEN` that carries its window.
-- Python wheels (`pip install spoiler`) that install the binary.
+- Releases on PyPI (`pip install spoiler`, wheels that install the binary), crates.io (`cargo install spoiler`), and GitHub Releases (binary archives for Linux glibc and static musl, and macOS, on x86_64 and arm64).
