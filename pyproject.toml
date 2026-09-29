@@ -6,11 +6,11 @@ build-backend = "maturin"
 
 [project]
 name = "spoiler"
-description = "Session recording traces, friction signals, and validated LLM narration for PostHog/rrweb"
+description = "Find where users got stuck in session recordings. Compiles rrweb/PostHog replays into deterministic traces; an LLM explains them and code checks every claim."
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT OR Apache-2.0"
-license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Sahil Shubham" }]
 keywords = ["session-replay", "rrweb", "posthog", "ux", "llm"]
 classifiers = [
@@ -28,7 +28,6 @@ dynamic = ["version"]
 [project.urls]
 Homepage = "https://spoiler.sh"
 Repository = "https://github.com/sahil-shubham/spoiler"
-Changelog = "https://github.com/sahil-shubham/spoiler/blob/main/CHANGELOG.md"
 
 [tool.maturin]
 bindings = "bin"

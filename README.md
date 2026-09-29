@@ -1,158 +1,232 @@
 # Spoiler
 
-Spoiler turns PostHog/rrweb session recordings into evidence you can inspect: it decodes recording data, replays browser DOM or native mobile wireframes, compiles user actions and visible effects into a deterministic trace with friction signals, and prepares or validates LLM narration through OpenRouter. A pinned product vocabulary supplies names and matching rules, so the same recording and vocabulary produce the same trace. The Rust core has no HTTP, database, or clock dependency; the CLI handles files and network access.
+Spoiler reads session recordings and reports what users tried, how it ended, and what blocked them.
+
+Code measures what happened. A model explains it. Code checks the explanation.
+
+- **In:** any rrweb recording, from a file or fetched from PostHog. Web, native iOS and Android.
+- **Out:** versioned JSON: a deterministic trace, and an analysis that cites it.
+- **Model:** any OpenRouter model, one call per visit. Compiling needs no model and no network.
+
+## Example
+
+A user spends 27 seconds deleting a project. The analysis:
+
+| | |
+| --- | --- |
+| **Task** | Delete the Website refresh project. |
+| **Outcome** | `workaround` · 25.3 s active · 9 actions · 2 data changes |
+| **Friction** `error` e2 e4 e8 | Delete project failed three times with 409 and "Couldn't delete: this project has an active task."<br>*Hypothesis: the message says what blocks the delete but gives no path to the Tasks tab, where the task can be completed.* |
+| **Friction** `confusion_loop` e7 e8 | Changed the project's status to Archived, then retried Delete project, which failed the same way. |
+| **Dropped** `slow` | "Delete project was slow to respond." No cited action carries a `slow` flag. |
+
+Refs, timings and counts come from code. This demo's prose is hand-written; it passed the same gate.
+
+The trace behind those refs (excerpt, columns selected):
+
+```text
+ref  t_s   target                                    flags                    effect
+e2   2.0   button[delete-project] "Delete project"   error_after,error_shown  net 409 /api/projects/42 180ms; +alert "Couldn't delete: this project has an ac…"
+e4   6.5   button[delete-project] "Delete project"   error_after,error_shown  net 409 /api/projects/42 180ms; +alert "Couldn't delete: this project has an ac…"
+e7   12.1  div[role=menuitemradio] "Archived"                                 -menu "Active Archived"; req /api/projects/42 200 140ms; text "Status: Active" → "Status: Archived"
+e8   14.1  button[delete-project] "Delete project"   error_after,error_shown  net 409 /api/projects/42 180ms; +alert "Couldn't delete: this project has an ac…"
+e10  18.1  button[role=tab] "Tasks"                                           aria-selected:true→false; aria-selected:false→true; -text "Refresh the public website."; +row "T-1043"
+e12  24.6  button[confirm-complete] "Complete task"                           -dialog "Complete task T-1043?"; req /api/tasks/1043/complete 200 210ms; cell Status "T-1043": "Active" → "Completed"
+e13  27.1  button[delete-project] "Delete project"                            req /api/projects/42 200 190ms; → /projects; +status "Project deleted"
+```
+
+## How it works
+
+```text
+source files ─▶ vocab build ─▶ vocabulary ─┐
+                (model, per release)       ├─▶ compile ─▶ trace ─▶ analyze ─▶ analysis
+recording ─────────────────────────────────┘   (code only)         (model, then code)
+```
+
+1. **Vocabulary.** `vocab build` has a model read source files you name.
+   It drafts surfaces, controls, domain terms and rules, each citing its source line.
+   What the sources don't cover is listed under `gaps`, not guessed.
+   The snapshot pins every source by SHA-256 and is never regenerated implicitly.
+   `--candidate` packages a vocabulary you wrote instead, with no model call.
+2. **Compile.** `compile` replays the recording's DOM log, one mirror per tab.
+   Each click resolves to an element, a vocabulary feature, what changed, and how fast.
+   Rules raise flags: `dead`, `unresponsive`, `rage`, `slow`, `error_after`, `error_shown`, `thrash`.
+   The same recording, vocabulary and compiler version always give the same trace.
+3. **Narrate.** `analyze` sends the trace as TSV, plus the vocabulary it touched.
+   The recording itself is never sent. `run` makes one call per visit.
+   The model returns tasks with a goal, outcome, obstacle and friction, all citing refs.
+   Outcomes are `done`, `workaround`, `gave_up` or `unclear`.
+4. **Gate.** Code checks every answer before accepting it:
+   - Off-schema, or over 15% of cited refs missing: rejected. A live call gets one corrected retry.
+   - `dead_click`, `rage_click`, `error` and `slow` friction is dropped without a matching flag.
+   - Timestamps, durations, paths and data changes are written from the trace, never by the model.
+   - `check` lists everything dropped, unexplained, or uncited.
 
 ## Install
 
-Prebuilt binaries cover Linux and macOS on x86_64 and arm64. Install from PyPI (there is no Python API; the wheel only puts `spoiler` on PATH):
-
 ```sh
-pip install spoiler    # or: uv tool install spoiler
-```
-
-Or download an archive from [GitHub Releases](https://github.com/sahil-shubham/spoiler/releases); each has a `.sha256` beside it, and the `*-linux-musl` builds are static, so they run on any Linux:
-
-```sh
+pip install spoiler              # or: uv tool install spoiler
+cargo install spoiler --locked   # Rust 1.88+
 curl -fsSL https://github.com/sahil-shubham/spoiler/releases/latest/download/spoiler-aarch64-apple-darwin.tar.gz | tar -xz
-./spoiler-aarch64-apple-darwin/spoiler --version
 ```
 
-Or build it from crates.io with Rust 1.88 or later:
+- Builds: Linux x86_64/aarch64 (glibc 2.28+, or static musl) and macOS arm64/x86_64.
+- The wheel only puts `spoiler` on `PATH`. There is no Python API.
+- Each [release](https://github.com/sahil-shubham/spoiler/releases) archive has a `.sha256` beside it.
+- From a checkout: `cargo install --path crates/cli --locked`.
+
+## Quick start
+
+Offline, from a checkout, using committed fixtures. No account or API key.
 
 ```sh
-cargo install spoiler --locked
-```
-
-Or build from source (the repository pins a Rust toolchain):
-
-```sh
-git clone https://github.com/sahil-shubham/spoiler.git
-cd spoiler
-cargo build --release --locked
-# Binary: target/release/spoiler
-```
-
-## Quick start (offline)
-
-From the repository root, these commands use only committed recording, vocabulary, and response examples. Generated artifacts go under ignored `artifacts/`; no account or API key is needed.
-
-```sh
-cargo build --release --locked
-mkdir -p artifacts
-./target/release/spoiler compile \
-  --recording corpus/click_changes_text.json --vocab corpus/vocabulary.yaml \
-  --app demo --out artifacts/trace.json
-./target/release/spoiler analyze \
-  --trace artifacts/trace.json --vocab corpus/vocabulary.yaml \
-  --prepare-only --out artifacts/request.json
-./target/release/spoiler analyze \
-  --trace artifacts/trace.json --vocab corpus/vocabulary.yaml \
+cargo build --release --locked && mkdir -p artifacts
+./target/release/spoiler compile --recording corpus/click_changes_text.json \
+  --vocab corpus/vocabulary.yaml --app demo --out artifacts/trace.json
+jq -r .tsv artifacts/trace.json
+./target/release/spoiler analyze --trace artifacts/trace.json --vocab corpus/vocabulary.yaml \
   --response examples/click_changes_text.response.json --out artifacts/analysis.json
-./target/release/spoiler vocab check --vocab corpus/vocabulary.yaml
 ```
 
-`artifacts/trace.json` contains actions, effects, visits, coverage, and a TSV view. `artifacts/request.json` shows the messages and response schema an online model would receive. The example response demonstrates offline validation of trace citations; it is not a model-generated answer.
+`--response` validates a stored answer. `--prepare-only` writes the exact model request instead.
+Neither sends anything.
+
+## On your product
+
+```sh
+export POSTHOG_API_KEY=… OPENROUTER_API_KEY=…
+spoiler vocab build --config product.json --model "$MODEL" \
+  --source src/routes.tsx --source src/pages/project.tsx \
+  --source-revision "$(git rev-parse HEAD)" --out vocab.json
+spoiler vocab check --vocab vocab.json
+spoiler run --project 123 --session "$SESSION_ID" --vocab vocab.json --app web \
+  --model "$MODEL" --out session.json
+```
+
+- `product.json` names each app: `{"apps": {"web": {"project": 123, "host": "app.example.com",
+  "audience": "workspace admins"}}}`.
+- Review model-drafted matchers before relying on a vocabulary.
+- Rebuild the vocabulary when you ship. Each trace records the digest it was compiled against.
+- `run` narrates every visit with user gestures. `--visit N` picks one.
 
 ## Commands
 
-Every input path accepts `-` for standard input, so commands compose with pipes:
+| Command | Reads → writes | Network |
+| --- | --- | --- |
+| `run` | recording or PostHog session → `session` (trace + per-visit analyses) | PostHog with `--session`, OpenRouter with `--model` |
+| `compile` | recording + vocabulary → `trace` | none |
+| `analyze` | trace → `analysis_request` or `analysis` | OpenRouter with `--model` |
+| `vocab build` | product config + sources → `vocabulary_snapshot` | OpenRouter, unless `--candidate` |
+| `vocab check` | vocabulary → `vocabulary_check` | none |
+| `decode` | recording file → normalized `recording` | none |
+| `recordings list`, `fetch` | PostHog project → `recording_page`, `recording` | PostHog |
+
+- One JSON artifact per command, to stdout or `--out` (written atomically).
+- Any input path accepts `-` for stdin, so commands pipe.
+- Configuration is flags only. Credentials come only from the environment.
+- No model is ever chosen for you.
+- `spoiler <command> --help` lists every flag.
 
 ```sh
-spoiler recordings fetch --project 123 --session SESSION_ID \
-  | spoiler compile --recording - --vocab vocab.yaml --app web \
-  | spoiler analyze --trace - --vocab vocab.yaml --prepare-only
+spoiler recordings fetch --project 123 --session "$SESSION_ID" \
+  | spoiler compile --recording - --vocab vocab.json --app web \
+  | spoiler analyze --trace - --vocab vocab.json --prepare-only
 ```
 
-- `spoiler run` does all of that in one step: it fetches a recording (`--session ID --project ID`) or reads one (`--recording FILE|-`), compiles it, and narrates every visit with user gestures (`--visit N` for just one). It writes one `session` artifact holding the recording's `source`, the `trace`, and per visit either an `analysis` (`--model`) or a `request` (`--prepare-only`). `--save-recording FILE` and `--save-trace FILE` also write the intermediate artifacts, byte for byte what `recordings fetch` and `compile` would write, so analyses' `trace_digest` matches the saved trace. A failed visit fails the whole run; nothing partial is written.
-- `spoiler decode --recording FILE [--out FILE]` normalizes a recording to a versioned recording artifact. Inputs include decoded rrweb event arrays, JSONL, compressed inputs, and PostHog snapshot lines.
-- `spoiler compile --recording FILE --vocab FILE --app APP [--out FILE]` creates a trace without network access. `--timings` prints stage timings on stderr.
-- `spoiler analyze --trace FILE --vocab FILE` prepares the model request (`--prepare-only`), validates an existing answer (`--response FILE`), or calls a model (`--model MODEL`); the first two take precedence over a model. Alternatively supply `--recording FILE --app APP` instead of `--trace`; `--visit N` selects one visit (zero-based). `--context FILE` adds a session header and `--system-prompt FILE` replaces the narration instructions. A model call requires `OPENROUTER_API_KEY` in the environment; no model is selected implicitly.
-- `spoiler vocab check --vocab FILE [--out FILE]` checks matcher validity and reports inert entries. `spoiler vocab build --config PRODUCT.json --source ROUTES.txt --source CONTROLS.txt --source-revision REV --model MODEL --out VOCAB.json` builds a snapshot from explicit UTF-8 source files and a product config (`apps`, including project, host, and audience). It requires `OPENROUTER_API_KEY`, unless `--candidate FILE` supplies an already prepared vocabulary, which takes precedence over `--model`. Consumers accept YAML/JSON vocabulary files or verified snapshots; they never regenerate implicitly.
-- `spoiler recordings list --project ID --since START --until END [--limit 100] [--out FILE]` discovers one page (`--cursor TOKEN` continues); `spoiler recordings fetch --project ID --session ID [--out FILE]` downloads snapshots. Both require `POSTHOG_API_KEY` in the environment. The default host is `https://eu.posthog.com`; use `--host` for another PostHog instance.
+Failures are JSON on stderr: `{"error": "…", "retryable": false}`.
 
-Configuration is flags only. Credentials come from the environment only, so they never appear in process listings or shell history: `POSTHOG_API_KEY` (a personal API key with read access to recordings) and `OPENROUTER_API_KEY`.
-
-For example, with a PostHog key set:
-
-```sh
-spoiler recordings list --project 123 --since 2026-09-01T00:00:00Z \
-  --until 2026-09-02T00:00:00Z --out artifacts/page.json
-spoiler recordings fetch --project 123 --session SESSION_ID --out artifacts/recording.json
-```
-
-Discovery queries `raw_session_replay_events` and paginates by start time and session id. A page's `next_cursor` is an opaque token; pass it back as `--cursor TOKEN` to get the next page. The token carries the project, host, and window, so `spoiler recordings list --cursor TOKEN` needs no other flags, and any given alongside it must match. Store it as a string; its contents are not a stable interface. Recordings ending after `--until` are excluded: choose a settled window and overlap syncs.
-
-Fetch requests `blob_v2` sources and downloads bounded Snappy snapshot blocks, at most 20 blob keys per range. `--max-requests` caps the listing plus planned ranges (default 50, maximum 59); it is not a cross-invocation rate limiter. PostHog counts **both** the listing and each range against the per-key snapshot throttle: free 12/min and 60/hour, paid 60/min and 300/hour, enterprise 100/min and 400/hour. A typical four-call recording therefore limits a paid key to about **75 recordings/hour**, shared with other users of that key.
-
-On a 429, fetch waits for `Retry-After` and retries only that request while the cumulative wait stays within `--max-wait` (default 60 seconds; 0 disables retries); otherwise it exits 75 with the retry time. Callers still own aggregate rate admission. `run --session` has the same fetch options. `--timeout` applies per request. Redirects are disabled; credentials travel only over HTTPS, except to loopback test servers.
-
-Discovery binds window and cursor values in a named HogQL query. It bounds metadata aggregation to segments within 24 hours of the window, and checks session IDs up to seven days outside it: some live IDs exceed PostHog's documented 24-hour cutoff. Recordings with segments farther than seven days outside the window can still appear complete incorrectly. It lists non-deleted recordings that started at least 24 hours ago and ended by `--until` within those bounds. Rows include `snapshot_source`, `snapshot_library`, and `retention_period_days` for capture-type and expiry decisions. PostHog's ad-hoc `/query` endpoint has rate and byte-read budgets; budget 429s are retryable, and callers should honor the reported `Retry-After`.
-
-## Native mobile recordings
-
-`spoiler compile` reads PostHog native iOS and Android events: screen-name Meta (`type: 4`), wireframe full snapshots (`type: 2`, `wireframes` and `initialOffset`), Android wireframe add/update/remove mutations, TouchStart/TouchEnd coordinates, and keyboard show/hide events. iOS can send a new full wireframe snapshot for **every frame**, including an action's visible response; these frames are compared for effects. Screenshot-mode frames use `type: screenshot` wireframes instead of an inspectable view tree. Flutter and React Native record screenshot-only replays upstream; when their snapshots use this mobile event format, the same screenshot limits apply. Supply the mobile app id, not the demo web app id:
-
-```sh
-python3 scripts/corpus.py
-spoiler compile --recording corpus/mobile_ios_button_text_effect.json \
-  --vocab corpus/vocabulary.yaml --app mobile --out mobile-trace.json
-```
-
-For native screens, Meta `href` is a screen name such as `SettingsScreen`, **not** necessarily an HTTP URL. Define its vocabulary `route` as that exact screen name (case-sensitive, with no invented leading slash); `--app` selects which app's surfaces may match. Browser URL paths still use ordinary path routes such as `/page`. Native touch coordinates are absolute within the recorded viewport; a wireframe hit can name a target, whereas screenshot pixels cannot be OCR'd into controls or text. A screenshot-only tap is reported as `screen (x,y)` with no invented button or pixel-change effect. Screenshot frame mounts are counted under `coverage.opaque_mounts.mobile_screenshot`; `coverage.screenshot_only` indicates that no labelled wireframe was available. Keyboard events report visibility, not typed characters. Check trace `coverage` for uninterpreted or malformed events before relying on a narration.
-
-## Vocabulary and prompts
-
-A vocabulary names apps, surfaces, and features, and may specify grid identities, telemetry URL fragments, error-message patterns, and timing thresholds. The corpus vocabulary is a minimal example. An optional grid configuration might look like:
-
-```yaml
-grid:
-  row_keys: [{ attribute: data-row-id }]
-  label_columns: [[name, title]]
-  generic_cell_features: { prefixes: [grid.column.], suffixes: [-cell] }
-telemetry: [/rum]
-error_text: ['(?i)\b(could not|failure)\b']
-thresholds: { slow_ms: 3000 }
-```
-
-Without grid conventions, rows are identified by their label, the first column labels a row, and a grid cell inherits its column feature only if it has no feature of its own. English error-message patterns and common monitoring-request filters apply by default. Review model-generated matchers before promoting a vocabulary; `vocab check` warns about app-chrome features (`surface: "*"`) with no app.
-
-The binary embeds `crates/core/prompts/narrate/system.md`, `crates/core/prompts/narrate/response.schema.json`, and `crates/core/prompts/vocabulary/system.md`. A custom narration prompt can be supplied via `--system-prompt`. Prompt provenance records its name and digest; `request_digest` covers the exact model messages and response schema. Prompt changes should be reviewed against prepared requests and real answers: automated checks do not measure narration quality.
-
-## Artifacts, validation, and limits
-
-Every artifact has a `kind` and per-kind `schema_version`: `trace` uses version 3; `analysis_request`, `analysis`, and `recording_page` use version 2; the other kinds (`recording`, `session`, `vocabulary_snapshot`, `vocabulary_check`) use version 1. A trace records its compiler version and SHA-256 digests of the recording and vocabulary. Readers reject incompatible kinds, schemas, compiler versions, invalid trace bounds/refs, and vocabulary mismatches. Trace refs (`e1`, `e2`, …) identify actions within one trace, including when analyzing a single visit. Visits split after 30 minutes without actions across tabs; a scheduler can analyze each visit with gestures separately.
-
-The trace's `coverage` reports duplicate, uninterpreted, or malformed events and opaque mounts such as iframes and canvases. It also includes `extensions` when browser-extension content was suppressed: keys are public Chrome extension IDs, known custom-element families, or URL-scheme names; counts include mounted or newly marked extension roots, dropped console errors/requests, and excluded gestures (up to 50 named keys, then `other`). `unlocated_snapshots` counts full snapshots on tabs with no known URL and no `$pageview`/`$url_changed` href in that window; those paths remain unknown rather than guessed. A missing Meta on an already located tab leaves its location intact. Both new coverage fields are omitted when zero or empty. Validated analyses retain only trace-supported claims, derive signal lists and uncited gestures, and report unsupported duration claims. OpenRouter calls request zero-data-retention routing and required parameter support. Invalid model answers can receive one corrected retry, and an empty answer is asked again once (its tokens are still counted); `--response` applies the same acceptance bar offline without retrying.
-
-Recordings are **untrusted input**. `--max-input-mib` (default 512) bounds local recording reads and aggregate downloaded snapshots, including decompressed streams and fields. HogQL and model JSON responses have a separate 32 MiB cap. `--out` writes to a synced `.spoiler-*.tmp` file before renaming, so failures leave an existing output intact; interrupted writes may leave the temporary file. Without `--out`, artifacts go to stdout. Failures are JSON on stderr with `error` and `retryable` fields:
-
-| Exit code | Meaning |
+| Exit | Meaning |
 | --- | --- |
 | `0` | Success |
-| `1` | Invalid input, configuration, or a non-transient upstream failure |
-| `2` | Invalid CLI invocation |
-| `75` | Transient upstream failure (such as 429, 5xx, timeout, or connection error) |
+| `1` | Invalid input or configuration, or a permanent upstream failure |
+| `2` | Invalid invocation |
+| `75` | Transient upstream failure: 429, 5xx, timeout, or connection error |
 
-## Behavior corpus and development
+## Reference
 
-The synthetic cases in `corpus/` define compiler behavior: each recording has a description and committed `*.expected.tsv` and `*.expected.json` goldens. To edit cases and review intended output changes:
+### Vocabulary
 
-```sh
-python3 scripts/corpus.py
-cargo test --test corpus
-SPOILER_BLESS=1 cargo test --test corpus  # only for intended changes; review the golden diff
+```yaml
+version: 1
+apps:
+  projects: { project: 1, host: projects.test, audience: "workspace members" }
+surfaces:
+  - { id: projects.detail, app: projects, route: "/projects/:projectId", name: "Project" }
+features:
+  - id: projects.project.delete
+    surface: projects.detail
+    name: "Delete project"
+    matchers: { testid: [delete-project] }
+    source: "project.tsx:13"
+terms:
+  - term: active task
+    means: "A project with an active task cannot be deleted: the server answers 409."
+    source: "projects.server.ts:5"
+gaps: ["Status menu options: status-menu.tsx is not among the sources."]
 ```
 
-Compiler-rule changes must bump `COMPILER_VERSION`. For general development:
+- Matchers, most specific first: `testid`, `data_attr`, `aria`, `title`, `placeholder`, `href`,
+  `text`, `role`, `class_contains`. `aria`, `text` and `title` also take `*_template` forms.
+- `surface: "*"` marks app chrome and requires `app`.
+- Optional: `statuses`, `grid` (row identity), `telemetry` (URLs to ignore), `error_text`, `thresholds`.
+- Defaults: English error patterns, common monitoring requests ignored, `slow_ms: 1000`.
+- `vocab check` reports invalid matchers and inert entries.
+
+### Recordings
+
+- Accepted: rrweb event arrays, JSONL, compressed input, and PostHog snapshot lines.
+- Native iOS and Android: taps resolve against PostHog wireframes.
+  Native routes are screen names such as `SettingsScreen`, matched case-sensitively.
+- Screenshot-mode frames, including Flutter and React Native, are opaque images.
+  A tap on one is reported as `screen (x,y)`, with no invented control.
+- A visit ends after 30 minutes without actions (`thresholds.visit_gap_ms`).
+
+### PostHog
+
+- `recordings list` returns one page. Pass its `next_cursor` back as `--cursor`.
+- It lists recordings that started over 24 hours ago and ended by `--until`.
+  Use settled windows, and overlap consecutive syncs.
+- Segments more than 7 days outside the window can make a recording look complete.
+- The default host is `https://eu.posthog.com`. Set `--host` for US or self-hosted.
+- Listings and snapshot ranges share PostHog's per-key throttle (paid: 60/min, 300/h).
+  A paid key fetches about 75 typical recordings an hour.
+- On 429, fetch honours `Retry-After` for up to `--max-wait` seconds (60), then exits `75`.
+- `--max-requests` caps requests per fetch (default 50, at most 59).
+
+### Data and security
+
+- Recordings are untrusted input. `--max-input-mib` (512) bounds decoded size.
+  HogQL and model responses are capped at 32 MiB.
+- Recordings are sensitive. Review what you send to PostHog and OpenRouter.
+- Model calls request zero-data-retention routing. Each analysis records model, tokens and cost.
+- Credentials travel only over HTTPS, and redirects are disabled.
+- Report vulnerabilities privately through
+  [GitHub security advisories](https://github.com/sahil-shubham/spoiler/security/advisories/new).
+
+### Limits
+
+- The DOM mirror can't see iframe documents, canvas pixels, or shadow-root internals.
+  Events from unrecognized rrweb plugins are not interpreted. `coverage` counts all of these.
+- rrweb records no key presses, so a keyboard-shortcut change has no gesture.
+- Masked inputs reveal only their length.
+- Tests cover the compiler and the gate, not narration quality or live PostHog behaviour.
+
+## Development
 
 ```sh
 cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributions and [SECURITY.md](SECURITY.md) for private vulnerability reports. Licensed under [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE).
+- `corpus/` holds synthetic recordings with golden traces. They define compiler behaviour.
+- Edit cases in `scripts/corpus.py`, then run `python3 scripts/corpus.py`.
+- Accept an intended output change with `SPOILER_BLESS=1 cargo test --test corpus`.
+  Review every golden diff.
+- A compile-rule change bumps `COMPILER_VERSION`. Readers reject traces from other versions.
+- Fixtures stay synthetic: no real recordings, credentials, or customer data.
+- Releasing is documented at the top of `.github/workflows/release.yml`.
 
-## Limitations
+## License
 
-The browser DOM mirror cannot see iframe documents, canvas pixels, shadow-root internals, or arbitrary unrecognized rrweb plugins. Native wireframes contain only what the SDK captured; screenshots are opaque images, not reconstructible view hierarchies, and touch coordinates do not establish which control a user intended when the target is absent. Inspect `coverage` when judging a trace. Live PostHog query/pagination behavior and model answer quality are not covered by automated tests. Avoid committing actual session recordings or credentials.
+[Apache-2.0](LICENSE)

@@ -10,6 +10,10 @@
 # release has its assets replaced), so "Re-run failed jobs" completes a release that stopped
 # halfway.
 #
+# To release: set `workspace.package.version` and the `spoiler-core` pin in `Cargo.toml`, and run
+# `cargo check` to update `Cargo.lock`. Commit, then `git tag vX.Y.Z && git push origin main
+# vX.Y.Z`. A tag with a hyphen (`v0.2.0-rc.1`) is a pre-release. GitHub generates the notes.
+#
 # One-time setup. No tokens are stored: both registries use trusted publishing.
 # - PyPI: add a pending trusted publisher for project `spoiler` with this repository, workflow
 #   `release.yml`, and environment `pypi`.
@@ -60,13 +64,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: 1.96.0
-      - name: Check the tag and extract its release notes
-        run: python3 scripts/release.py "$GITHUB_REF_NAME" > release-notes.md
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-notes
-          path: release-notes.md
-          if-no-files-found: error
+      - name: Check the tag against the workspace version
+        run: python3 scripts/release.py "$GITHUB_REF_NAME"
 
   ci:
     if: startsWith(github.ref, 'refs/tags/')
@@ -106,7 +105,7 @@ jobs:
         run: |
           name=spoiler-$TARGET
           mkdir "$name" archive
-          cp "target/$TARGET/release/spoiler" LICENSE-MIT LICENSE-APACHE README.md "$name/"
+          cp "target/$TARGET/release/spoiler" LICENSE README.md "$name/"
           tar --no-xattrs -czf "archive/$name.tar.gz" "$name"
           cd archive && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - name: Unpack the archive
@@ -238,9 +237,6 @@ jobs:
           pattern: archive-*
           path: assets
           merge-multiple: true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-notes
       - name: Create the release, or replace the assets of an existing one
         env:
           GH_TOKEN: ${{ github.token }}
@@ -253,5 +249,5 @@ jobs:
             flags=()
             if [[ $TAG == *-* ]]; then flags+=(--prerelease); fi
             gh release create "$TAG" assets/* --verify-tag --title "$TAG" \
-              --notes-file release-notes.md "${flags[@]}"
+              --generate-notes "${flags[@]}"
           fi
