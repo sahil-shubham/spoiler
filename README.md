@@ -10,30 +10,34 @@ Code measures what happened. A model explains it. Code checks the explanation.
 
 ## Example
 
-A user spends 27 seconds deleting a project. The analysis:
+An admin invites a teammate, but every seat is taken. From the 22-second recording, Spoiler reports:
 
-| | |
-| --- | --- |
-| **Task** | Delete the Website refresh project. |
-| **Outcome** | `workaround` · 25.3 s active · 9 actions · 2 data changes |
-| **Friction** `error` e2 e4 e8 | Delete project failed three times with 409 and "Couldn't delete: this project has an active task."<br>*Hypothesis: the message says what blocks the delete but gives no path to the Tasks tab, where the task can be completed.* |
-| **Friction** `confusion_loop` e7 e8 | Changed the project's status to Archived, then retried Delete project, which failed the same way. |
-| **Dropped** `slow` | "Delete project was slow to respond." No cited action carries a `slow` flag. |
+**Task:** Invite `priya@example.com` to the workspace. **Outcome:** `workaround`.
 
-Refs, timings and counts come from code. This demo's prose is hand-written; it passed the same gate.
+> Send invite was refused three times because all 5 seats were in use.
+> Deactivating Ben Ortiz did not free his seat. Removing him did.
+>
+> *Hypothesis: the message doesn't say that deactivated members still hold seats.*
 
-The trace behind those refs (excerpt, columns selected):
+The *why* comes from the vocabulary term `seat`, drafted from `members.server.ts:4`.
+It reads: "Every member holds a seat until removed, deactivated members included."
 
-```text
-ref  t_s   target                                    flags                    effect
-e2   2.0   button[delete-project] "Delete project"   error_after,error_shown  net 409 /api/projects/42 180ms; +alert "Couldn't delete: this project has an ac…"
-e4   6.5   button[delete-project] "Delete project"   error_after,error_shown  net 409 /api/projects/42 180ms; +alert "Couldn't delete: this project has an ac…"
-e7   12.1  div[role=menuitemradio] "Archived"                                 -menu "Active Archived"; req /api/projects/42 200 140ms; text "Status: Active" → "Status: Archived"
-e8   14.1  button[delete-project] "Delete project"   error_after,error_shown  net 409 /api/projects/42 180ms; +alert "Couldn't delete: this project has an ac…"
-e10  18.1  button[role=tab] "Tasks"                                           aria-selected:true→false; aria-selected:false→true; -text "Refresh the public website."; +row "T-1043"
-e12  24.6  button[confirm-complete] "Complete task"                           -dialog "Complete task T-1043?"; req /api/tasks/1043/complete 200 210ms; cell Status "T-1043": "Active" → "Completed"
-e13  27.1  button[delete-project] "Delete project"                            req /api/projects/42 200 190ms; → /projects; +status "Project deleted"
-```
+Each claim cites refs into the trace, which code compiles from the recording with no model:
+
+| ref | t_s | target | effect | flags |
+| --- | --- | --- | --- | --- |
+| e2 | 1.0 | `input[invite-email] "name@company.com"` | `typed "priya@example.com"` | |
+| e3 | 3.0 | `button[send-invite] "Send invite"` | `net 402 /api/invites 170ms; +alert "Couldn't send invite: all 5 seats are i…"` | `error_after,error_shown` |
+| e5 | 6.5 | `button[send-invite] "Send invite"` | `net 402 /api/invites 170ms; +alert "Couldn't send invite: all 5 seats are i…"` | `error_after,error_shown` |
+| e7 | 10.6 | `button[deactivate-member] "Deactivate" in cell[Actions] "Ben Ortiz"` | `req /api/members/m-ben/deactivate 200 150ms; cell Status "Ben Ortiz": "Active" → "Deactivated"; cell Actions "Ben Ortiz": "Deactivate Remove" → "Remove"` | |
+| e8 | 13.1 | `button[send-invite] "Send invite"` | `net 402 /api/invites 170ms; +alert "Couldn't send invite: all 5 seats are i…"` | `error_after,error_shown` |
+| e11 | 19.6 | `button[confirm-remove] "Remove"` | `-dialog "Remove Ben Ortiz?"; req /api/members/m-ben 200 160ms; -row "Ben Ortiz"` | |
+| e12 | 22.1 | `button[send-invite] "Send invite"` | `req /api/invites 201 180ms; +status "Invitation sent to priya@example.com"` | |
+
+The answer also claimed "Rage-clicked Send invite after the first refusal", citing e3 and e5.
+Code dropped it: the clicks were 3.5 s apart, and neither carries a `rage` flag.
+
+The session is synthetic and this narration is hand-written. With `--model`, a model writes it.
 
 ## How it works
 
@@ -65,49 +69,128 @@ recording ───────────────────────�
 ## Install
 
 ```sh
-pip install spoiler              # or: uv tool install spoiler
-cargo install spoiler --locked   # Rust 1.88+
-curl -fsSL https://github.com/sahil-shubham/spoiler/releases/latest/download/spoiler-aarch64-apple-darwin.tar.gz | tar -xz
+curl -fsSL https://spoiler.sh/install | sh
 ```
 
-- Builds: Linux x86_64/aarch64 (glibc 2.28+, or static musl) and macOS arm64/x86_64.
-- The wheel only puts `spoiler` on `PATH`. There is no Python API.
-- Each [release](https://github.com/sahil-shubham/spoiler/releases) archive has a `.sha256` beside it.
-- From a checkout: `cargo install --path crates/cli --locked`.
+- Installs the binary for your OS and CPU to `~/.local/bin`, after checking its sha256.
+- Linux gets the static musl build, which runs on any distribution.
+- `… | SPOILER_VERSION=v0.1.0 sh` pins a release. `SPOILER_INSTALL_DIR` picks the directory.
+
+From PyPI. The wheel only puts the `spoiler` binary on `PATH`; there is no Python API.
+
+```sh
+pip install spoiler
+```
+
+`uv tool install spoiler` works the same way. With Rust 1.88+, from crates.io:
+
+```sh
+cargo install spoiler --locked
+```
+
+[Releases](https://github.com/sahil-shubham/spoiler/releases) has an archive per target, each with a `.sha256`:
+
+- `aarch64-apple-darwin`, `x86_64-apple-darwin`
+- `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` (glibc 2.28+)
+- `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` (static; any Linux)
+
+From a checkout: `cargo install --path crates/cli --locked`.
 
 ## Quick start
 
 Offline, from a checkout, using committed fixtures. No account or API key.
 
+Build, and put the binary on `PATH`:
+
 ```sh
-cargo build --release --locked && mkdir -p artifacts
-./target/release/spoiler compile --recording corpus/click_changes_text.json \
-  --vocab corpus/vocabulary.yaml --app demo --out artifacts/trace.json
-jq -r .tsv artifacts/trace.json
-./target/release/spoiler analyze --trace artifacts/trace.json --vocab corpus/vocabulary.yaml \
-  --response examples/click_changes_text.response.json --out artifacts/analysis.json
+cargo build --release --locked
+export PATH="$PWD/target/release:$PATH"
+mkdir -p artifacts
 ```
 
-`--response` validates a stored answer. `--prepare-only` writes the exact model request instead.
+Compile a recording into a trace. No model, no network:
+
+```sh
+spoiler compile \
+  --recording corpus/click_changes_text.json \
+  --vocab corpus/vocabulary.yaml \
+  --app demo \
+  --out artifacts/trace.json
+```
+
+Read the trace the way a model does:
+
+```sh
+jq -r .tsv artifacts/trace.json
+```
+
+Validate a stored answer against the trace:
+
+```sh
+spoiler analyze \
+  --trace artifacts/trace.json \
+  --vocab corpus/vocabulary.yaml \
+  --response examples/click_changes_text.response.json \
+  --out artifacts/analysis.json
+```
+
+Swap `--response FILE` for `--prepare-only` to write the exact model request instead.
 Neither sends anything.
 
 ## On your product
 
+Set credentials, which Spoiler reads only from the environment, and two variables used below:
+
 ```sh
-export POSTHOG_API_KEY=… OPENROUTER_API_KEY=…
-spoiler vocab build --config product.json --model "$MODEL" \
-  --source src/routes.tsx --source src/pages/project.tsx \
-  --source-revision "$(git rev-parse HEAD)" --out vocab.json
-spoiler vocab check --vocab vocab.json
-spoiler run --project 123 --session "$SESSION_ID" --vocab vocab.json --app web \
-  --model "$MODEL" --out session.json
+export POSTHOG_API_KEY=phx_…
+export OPENROUTER_API_KEY=sk-or-…
+MODEL=…       # any OpenRouter model id
+SESSION_ID=…  # a PostHog recording id
 ```
 
-- `product.json` names each app: `{"apps": {"web": {"project": 123, "host": "app.example.com",
-  "audience": "workspace admins"}}}`.
-- Review model-drafted matchers before relying on a vocabulary.
-- Rebuild the vocabulary when you ship. Each trace records the digest it was compiled against.
+Describe each app in `product.json`. `project` is its PostHog project id:
+
+```json
+{
+  "apps": {
+    "web": { "project": 123, "host": "app.example.com", "audience": "workspace admins" }
+  }
+}
+```
+
+Build a vocabulary from the source files that name your routes and controls:
+
+```sh
+spoiler vocab build \
+  --config product.json \
+  --source app/routes.ts \
+  --source app/routes/members.tsx \
+  --source app/members.server.ts \
+  --source-revision "$(git rev-parse HEAD)" \
+  --model "$MODEL" \
+  --out vocab.json
+```
+
+Check it, and review the drafted matchers before relying on them:
+
+```sh
+spoiler vocab check --vocab vocab.json
+```
+
+Fetch, compile and narrate one PostHog session:
+
+```sh
+spoiler run \
+  --project 123 \
+  --session "$SESSION_ID" \
+  --vocab vocab.json \
+  --app web \
+  --model "$MODEL" \
+  --out session.json
+```
+
 - `run` narrates every visit with user gestures. `--visit N` picks one.
+- Rebuild the vocabulary when you ship. Each trace records the digest it was compiled against.
 
 ## Commands
 
@@ -126,6 +209,8 @@ spoiler run --project 123 --session "$SESSION_ID" --vocab vocab.json --app web \
 - Configuration is flags only. Credentials come only from the environment.
 - No model is ever chosen for you.
 - `spoiler <command> --help` lists every flag.
+
+Each stage also runs alone, and they pipe:
 
 ```sh
 spoiler recordings fetch --project 123 --session "$SESSION_ID" \
@@ -149,20 +234,22 @@ Failures are JSON on stderr: `{"error": "…", "retryable": false}`.
 ```yaml
 version: 1
 apps:
-  projects: { project: 1, host: projects.test, audience: "workspace members" }
+  workspace: { project: 1, host: app.test, audience: "workspace admins" }
 surfaces:
-  - { id: projects.detail, app: projects, route: "/projects/:projectId", name: "Project" }
+  - { id: workspace.members, app: workspace, route: /settings/members, name: "Members" }
 features:
-  - id: projects.project.delete
-    surface: projects.detail
-    name: "Delete project"
-    matchers: { testid: [delete-project] }
-    source: "project.tsx:13"
+  - id: members.invite.send
+    surface: workspace.members
+    name: "Send invite"
+    matchers: { testid: [send-invite] }
+    source: "members.tsx:11"
 terms:
-  - term: active task
-    means: "A project with an active task cannot be deleted: the server answers 409."
-    source: "projects.server.ts:5"
-gaps: ["Status menu options: status-menu.tsx is not among the sources."]
+  - term: seat
+    means: "Every member holds a seat until removed, deactivated members included."
+    source: "members.server.ts:4"
+statuses:
+  - { kind: member, value: deactivated, label: Deactivated }
+gaps: ["Billing page: billing.tsx is not among the sources, so seat purchases are unnamed."]
 ```
 
 - Matchers, most specific first: `testid`, `data_attr`, `aria`, `title`, `placeholder`, `href`,

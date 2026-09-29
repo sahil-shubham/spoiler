@@ -1,7 +1,8 @@
 # Releases a `v*` tag: Python wheels of the `spoiler` binary on PyPI, the `spoiler-core` and
-# `spoiler` crates on crates.io, and a binary archive per target on GitHub Releases. Every
-# artifact is built here from the tagged commit, and nothing is published until the tag check, CI,
-# every build and its smoke test, the sdist build, and the crates.io dry run have passed:
+# `spoiler` crates on crates.io, and on GitHub Releases a binary archive per target plus
+# `scripts/install.sh`, which https://spoiler.sh/install redirects to. Every artifact is built
+# here from the tagged commit, and nothing is published until the tag check, CI, every build and
+# its smoke test, the sdist build, and the crates.io dry run have passed:
 #
 #   plan, ci, build (6 targets), sdist, crates ──► publish-pypi, publish-crates ──► github-release
 #
@@ -232,11 +233,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: archive-*
           path: assets
           merge-multiple: true
+      # releases/latest/download/install.sh always installs the binaries released beside it.
+      - run: cp scripts/install.sh assets/
       - name: Create the release, or replace the assets of an existing one
         env:
           GH_TOKEN: ${{ github.token }}
