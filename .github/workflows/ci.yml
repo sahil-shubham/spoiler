@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Tags are checked by release.yml, which runs this workflow before publishing.
   push:
+    branches: ["**"]
   pull_request:
+  workflow_call:
 
 jobs:
   fmt:

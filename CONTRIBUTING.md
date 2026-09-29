@@ -7,3 +7,13 @@ Compiler behavior is captured by the synthetic corpus. Edit a case and its descr
 Never include a real recording, credentials, or customer data in tests, issues, or pull requests. Synthetic fixtures are sufficient for reproductions.
 
 By submitting a contribution, you agree to license it under MIT OR Apache-2.0, at your choice.
+
+## Releasing
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes wheels to PyPI, `spoiler-core` and `spoiler` to crates.io, and per-target binary archives to GitHub Releases. All three share the workspace version.
+
+1. Set the version in `Cargo.toml`, both `workspace.package.version` and the `spoiler-core` pin, then run `cargo check` to update `Cargo.lock`.
+2. Head the version's changelog section `## [X.Y.Z] - YYYY-MM-DD`. Its body becomes the release notes.
+3. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+
+The workflow rejects a tag that disagrees with the workspace version or has no dated changelog section, and it publishes nothing until CI and every build pass. If a publish job fails, fix the cause and re-run the failed jobs: versions that are already published are skipped. A pre-release tag such as `v0.2.0-rc.1` needs its own changelog section and produces a GitHub pre-release. The workflow file's header lists the one-time registry setup.
