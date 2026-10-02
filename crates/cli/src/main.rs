@@ -22,12 +22,13 @@ use io::{
 };
 use serde_json::json;
 use spoiler_core::{
-    analysis::{self, Assessment, Instructions},
+    analysis::{self, Assessment, Check, GATE_VERSION, Instructions, SessionSummary},
     artifact::{
-        AnalysisArtifact, AnalysisProvenance, AnalysisRequest, Header, Kind, Narration,
-        RecordingArtifact, RecordingSource, SessionArtifact, TraceArtifact, VisitNarration,
-        VocabularyCheck, sha256_hex,
+        AnalysisArtifact, AnalysisProvenance, AnalysisRequest, Header, Kind, ModelUsage, Narration,
+        PreviousAnalysis, RecordingArtifact, RecordingSource, SessionArtifact, TraceArtifact,
+        Versions, Via, VisitNarration, VocabularyCheck, sha256_hex,
     },
+    model::Message,
     recording::{self, Limits, Recording},
     trace::{self, COMPILER_VERSION},
     vocab::Matcher,
@@ -162,6 +163,9 @@ enum Command {
         #[command(subcommand)]
         command: RecordingsCommand,
     },
+    /// Print the versions this build writes: artifact shapes, the compiler, the answer gate and
+    /// the narration prompt. Compare a stored artifact's against them to decide what to redo.
+    Versions,
 }
 
 #[derive(clap::Args)]
@@ -233,6 +237,10 @@ struct RunArgs {
     /// Also write the trace here, as `compile` would; analyses cite this file's digest.
     #[arg(long)]
     save_trace: Option<PathBuf>,
+    /// A session artifact from an earlier `run`: a visit whose model request is unchanged
+    /// reuses its analysis instead of asking the model again.
+    #[arg(long)]
+    previous: Option<PathBuf>,
     #[command(flatten)]
     ask: Ask,
     #[command(flatten)]
@@ -387,6 +395,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Run(args) => run_session(args, limits),
         Command::Vocab { command } => vocab(command),
         Command::Recordings { command } => recordings(command, limits),
+        Command::Versions => publish(&Versions::current(), None),
     }
 }
 
@@ -510,8 +519,15 @@ impl<'a> Narrator<'a> {
     }
 
     /// Narrate one visit of the trace, or all of it. A visit's actions keep their refs, so its
-    /// analysis cites the same refs as the trace's.
-    fn narrate(&self, visit: Option<usize>, answer: &Answer) -> Result<Narration> {
+    /// analysis cites the same refs as the trace's. An earlier analysis of the identical
+    /// request is reused instead of asking again: kept if this gate accepted it, judged again
+    /// if not.
+    fn narrate(
+        &self,
+        visit: Option<usize>,
+        answer: &Answer,
+        previous: &[PreviousAnalysis],
+    ) -> Result<(Narration, Via)> {
         let trace = self.trace;
         let (actions, tsv) = match visit {
             Some(index) => {
@@ -542,36 +558,108 @@ impl<'a> Narrator<'a> {
             prompt: instructions.id(),
             request_digest: sha256_hex(&serde_json::to_vec(&(&messages, response_schema))?),
         };
-        let (summary, check, model) = match answer {
-            Answer::Request => {
-                return Ok(Narration::Request(AnalysisRequest {
+        let earlier = previous
+            .iter()
+            .find(|analysis| analysis.request_digest == provenance.request_digest);
+        // Reuse costs no model call, so it applies to --prepare-only too: what is left as a
+        // request is exactly what would be paid for.
+        let reused = match earlier {
+            Some(earlier) if earlier.gate_version == GATE_VERSION => Some((
+                Answered {
+                    summary: earlier.summary.clone(),
+                    check: earlier.check.clone(),
+                    model: earlier.model.clone(),
+                    answer: earlier.answer.clone(),
+                },
+                Via::Reused,
+            )),
+            Some(PreviousAnalysis {
+                answer: Some(text),
+                model,
+                ..
+            }) => match analysis::assess(text, actions, vocabulary) {
+                Assessment::Accepted { summary, check } => Some((
+                    Answered {
+                        summary,
+                        check,
+                        model: model.clone(),
+                        answer: Some(text.clone()),
+                    },
+                    Via::Regated,
+                )),
+                // This gate refuses what an older one accepted: ask again, as for a new request.
+                Assessment::Rejected { .. } => None,
+            },
+            _ => None,
+        };
+        let (answered, via) = match reused {
+            Some(reused) => reused,
+            None if matches!(answer, Answer::Request) => {
+                let request = AnalysisRequest {
                     header: Header::new(Kind::AnalysisRequest),
                     provenance,
                     messages,
                     response_schema: response_schema.clone(),
-                }));
+                };
+                return Ok((Narration::Request(request), Via::Narrated));
             }
+            None => (self.ask(answer, messages, actions)?, Via::Narrated),
+        };
+        let analysis = AnalysisArtifact {
+            header: Header::new(Kind::Analysis),
+            provenance,
+            summary: answered.summary,
+            check: answered.check,
+            model: answered.model,
+            gate_version: GATE_VERSION,
+            answer: answered.answer,
+        };
+        Ok((Narration::Analysis(analysis), via))
+    }
+
+    /// An answer from the response file or the model, held to this gate.
+    fn ask(
+        &self,
+        answer: &Answer,
+        messages: Vec<Message>,
+        actions: &[trace::Action],
+    ) -> Result<Answered> {
+        let vocabulary = &self.vocabulary.vocabulary;
+        match answer {
+            Answer::Request => anyhow::bail!("a prepared request has no answer"),
             // Held to the same bar as a live answer: a response the retry loop would send back
             // is not an analysis.
             Answer::Response(response) => match analysis::assess(response, actions, vocabulary) {
-                Assessment::Accepted { summary, check } => (summary, check, None),
+                Assessment::Accepted { summary, check } => Ok(Answered {
+                    summary,
+                    check,
+                    model: None,
+                    answer: Some(response.clone()),
+                }),
                 Assessment::Rejected { reason } => {
                     anyhow::bail!("model response rejected: {reason}")
                 }
             },
             Answer::Model(client) => {
-                let (summary, check, usage) = client.narrate(messages, actions, vocabulary)?;
-                (summary, check, Some(usage))
+                let (summary, check, usage, content) =
+                    client.narrate(messages, actions, vocabulary)?;
+                Ok(Answered {
+                    summary,
+                    check,
+                    model: Some(usage),
+                    answer: Some(content),
+                })
             }
-        };
-        Ok(Narration::Analysis(AnalysisArtifact {
-            header: Header::new(Kind::Analysis),
-            provenance,
-            summary,
-            check,
-            model,
-        }))
+        }
     }
+}
+
+/// An accepted answer and what it cost.
+struct Answered {
+    summary: SessionSummary,
+    check: Check,
+    model: Option<ModelUsage>,
+    answer: Option<String>,
 }
 
 fn visit_actions(trace: &TraceArtifact, index: usize) -> Result<&[trace::Action]> {
@@ -636,7 +724,7 @@ fn analyze(args: AnalyzeArgs, limits: Limits) -> Result<()> {
     let narrator = Narrator::new(&vocabulary, &trace, &trace_digest, &args.ask)?;
     let answer = answer(&args.ask, args.response.as_deref(), &args.network)?;
     let out = args.output.out.as_deref();
-    match narrator.narrate(args.visit, &answer)? {
+    match narrator.narrate(args.visit, &answer, &[])?.0 {
         Narration::Request(request) => publish(&request, out),
         Narration::Analysis(analysis) => publish(&analysis, out),
     }
@@ -677,6 +765,11 @@ fn run_session(args: RunArgs, limits: Limits) -> Result<()> {
         Some(path) => publish_digest(&trace, Some(path))?,
         None => digest(&trace)?,
     };
+    let previous = match &args.previous {
+        Some(path) => SessionArtifact::previous_analyses(&read(path)?)
+            .with_context(|| format!("loading previous session {}", path.display()))?,
+        None => Vec::new(),
+    };
     let narrator = Narrator::new(&vocabulary, &trace, &trace_digest, &args.ask)?;
     let visits: Vec<usize> = match args.visit {
         Some(index) => vec![index],
@@ -690,10 +783,14 @@ fn run_session(args: RunArgs, limits: Limits) -> Result<()> {
     let visits = visits
         .into_iter()
         .map(|visit| {
-            let narration = narrator
-                .narrate(Some(visit), &answer)
+            let (narration, via) = narrator
+                .narrate(Some(visit), &answer, &previous)
                 .with_context(|| format!("narrating visit {visit}"))?;
-            Ok(VisitNarration { visit, narration })
+            Ok(VisitNarration {
+                visit,
+                via,
+                narration,
+            })
         })
         .collect::<Result<Vec<_>>>()?;
     let session = SessionArtifact {
@@ -936,5 +1033,116 @@ mod tests {
             sha256_hex(&std::fs::read(&recording).unwrap()).as_str()
         );
         std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn run_reuses_an_earlier_analysis_of_the_same_request_and_regates_an_older_one() {
+        let directory = scratch("run-previous");
+        let vocab = corpus("vocabulary.yaml");
+        let recording = corpus("click_changes_text.json");
+        let (analysis_path, previous_path, session_path) = (
+            directory.join("analysis.json"),
+            directory.join("previous.json"),
+            directory.join("session.json"),
+        );
+        let common = [
+            "--recording",
+            recording.to_str().unwrap(),
+            "--vocab",
+            vocab.to_str().unwrap(),
+            "--app",
+            "demo",
+        ];
+        // An analysis of visit 0 from an answer on file: what an earlier run would have stored.
+        let answer = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/click_changes_text.response.json");
+        let mut args = vec![
+            "analyze",
+            "--visit",
+            "0",
+            "--response",
+            answer.to_str().unwrap(),
+        ];
+        args.extend(common);
+        args.extend(["--out", analysis_path.to_str().unwrap()]);
+        spoiler(&args);
+        let analysis = read_json(&analysis_path);
+
+        let rerun = |previous_analysis: Value| {
+            let previous = serde_json::json!({
+                "schema_version": Kind::Session.schema_version(),
+                "kind": "session",
+                "visits": [{ "visit": 0, "analysis": previous_analysis }],
+            });
+            std::fs::write(&previous_path, previous.to_string()).unwrap();
+            let mut args = vec!["run", "--prepare-only", "--visit", "0"];
+            args.extend(common);
+            args.extend([
+                "--previous",
+                previous_path.to_str().unwrap(),
+                "--out",
+                session_path.to_str().unwrap(),
+            ]);
+            spoiler(&args);
+            read_json(&session_path)["visits"][0].clone()
+        };
+
+        let reused = rerun(analysis.clone());
+        assert_eq!(
+            reused["via"], "reused",
+            "same request, same gate: no model call"
+        );
+        assert_eq!(reused["analysis"]["summary"], analysis["summary"]);
+        assert_eq!(reused["analysis"]["answer"], analysis["answer"]);
+
+        let mut older = analysis.clone();
+        older["gate_version"] = serde_json::json!(GATE_VERSION - 1);
+        let regated = rerun(older.clone());
+        assert_eq!(
+            regated["via"], "regated",
+            "an older gate's answer is judged again"
+        );
+        assert_eq!(regated["analysis"]["gate_version"], GATE_VERSION);
+
+        older.as_object_mut().unwrap().remove("answer");
+        let asked = rerun(older);
+        assert_eq!(
+            asked["via"], "narrated",
+            "no stored answer to judge: ask again"
+        );
+        assert!(asked["request"].is_object());
+
+        // A caller that kept analyses as rows rebuilds only what reuse reads.
+        let rows = serde_json::json!({
+            "request_digest": analysis["request_digest"],
+            "summary": analysis["summary"],
+            "check": analysis["check"],
+        });
+        assert_eq!(
+            rerun(rows)["via"],
+            "reused",
+            "no provenance, gate or answer needed"
+        );
+
+        let mut changed = analysis;
+        changed["request_digest"] = serde_json::json!("another question");
+        assert!(
+            rerun(changed)["request"].is_object(),
+            "a changed request is asked"
+        );
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn versions_name_what_this_build_writes() {
+        let versions = serde_json::to_value(Versions::current()).unwrap();
+        assert_eq!(versions["compiler"], COMPILER_VERSION);
+        assert_eq!(versions["gate"], GATE_VERSION);
+        assert_eq!(versions["schemas"]["trace"], Kind::Trace.schema_version());
+        assert_eq!(
+            versions["prompt"]["sha256"],
+            Instructions::default().id().sha256.as_str(),
+            "the prompt identity is the one analyses record"
+        );
     }
 }

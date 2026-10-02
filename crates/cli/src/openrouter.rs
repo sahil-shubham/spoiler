@@ -137,7 +137,7 @@ impl OpenRouter {
         mut messages: Vec<Message>,
         actions: &[Action],
         vocabulary: &Vocabulary,
-    ) -> Result<(SessionSummary, Check, ModelUsage)> {
+    ) -> Result<(SessionSummary, Check, ModelUsage, String)> {
         let mut usage = ModelUsage {
             model: self.model.clone(),
             ..ModelUsage::default()
@@ -166,7 +166,9 @@ impl OpenRouter {
                 );
             };
             match analysis::assess(&content, actions, vocabulary) {
-                Assessment::Accepted { summary, check } => return Ok((summary, check, usage)),
+                Assessment::Accepted { summary, check } => {
+                    return Ok((summary, check, usage, content));
+                }
                 Assessment::Rejected { reason } if attempt < MAX_ATTEMPTS => {
                     messages.push(Message::new(Role::Assistant, content));
                     messages.push(Message::new(Role::User, Assessment::feedback(&reason)));
@@ -255,7 +257,7 @@ mod tests {
             token: "test".into(),
             model: "test/model".into(),
         };
-        let (_, _, usage) = client
+        let (_, _, usage, _) = client
             .narrate(
                 vec![Message::new(Role::User, "trace")],
                 &actions,

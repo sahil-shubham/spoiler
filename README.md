@@ -191,6 +191,10 @@ spoiler run \
 
 - `run` narrates every visit with user gestures. `--visit N` picks one.
 - Rebuild the vocabulary when you ship. Each trace records the digest it was compiled against.
+- After upgrading spoiler, rerun with `--previous session.json`: a visit whose model request is
+  unchanged reuses its analysis (`"via": "reused"`, or `"regated"` when a newer gate judged the
+  stored answer again), so only changed questions reach the model. With `--prepare-only`, what
+  is left as a request is exactly what would be paid for.
 
 ## Commands
 
@@ -203,6 +207,7 @@ spoiler run \
 | `vocab check` | vocabulary → `vocabulary_check` | none |
 | `decode` | recording file → normalized `recording` | none |
 | `recordings list`, `fetch` | PostHog project → `recording_page`, `recording` | PostHog |
+| `versions` | → the artifact shapes, compiler, gate and prompt this build writes | none |
 
 - One JSON artifact per command, to stdout or `--out` (written atomically).
 - Any input path accepts `-` for stdin, so commands pipe.

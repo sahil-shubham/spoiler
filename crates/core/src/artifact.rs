@@ -2,14 +2,19 @@
 //!
 //! Every artifact carries `schema_version` and a `kind` discriminator and names the digests of
 //! the inputs it was derived from, so a stored result can always be traced to exactly what
-//! produced it. Versions are per kind: changing a field's shape or meaning bumps that kind's
-//! [`Kind::schema_version`] and leaves artifacts of other kinds readable.
+//! produced it. Versions are per kind and count shape only: removing, retyping or re-meaning a
+//! field bumps that kind's [`Kind::schema_version`]. Adding a field does not — readers ignore
+//! fields they do not know and default fields an older writer did not write.
+//!
+//! What a field's *value* depends on is versioned by the rules that compute it:
+//! [`crate::trace::COMPILER_VERSION`] for traces and [`crate::analysis::GATE_VERSION`] for
+//! accepted answers. [`Versions`] reports them all.
 
 use crate::{
-    analysis::{Check, SessionSummary},
+    analysis::{Check, GATE_VERSION, Instructions, SessionSummary},
     model::Message,
     recording::Recording,
-    trace::{Action, Coverage, Visit},
+    trace::{Action, COMPILER_VERSION, Coverage, Visit},
     vocab::{App, Vocabulary},
 };
 use indexmap::IndexMap;
@@ -55,7 +60,7 @@ fn hex(bytes: &[u8]) -> String {
         })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Recording,
@@ -285,6 +290,17 @@ pub struct AnalysisArtifact {
     /// Absent when an existing model response was validated offline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelUsage>,
+    /// The [`GATE_VERSION`] that accepted the answer. Analyses written before it was recorded
+    /// were all accepted by gate 1.
+    #[serde(default = "first_gate")]
+    pub gate_version: u32,
+    /// The model's answer as accepted, so a later gate can judge it again without a model call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+}
+
+fn first_gate() -> u32 {
+    1
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -300,7 +316,7 @@ pub struct ModelUsage {
 /// A narration of one trace or visit: the model request alone, or the validated analysis.
 // A handful per run, each serialized once: boxing would buy nothing.
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Narration {
     Request(AnalysisRequest),
@@ -318,12 +334,106 @@ pub struct SessionArtifact {
     pub visits: Vec<VisitNarration>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+impl SessionArtifact {
+    /// The analyses of an earlier session artifact, for `run --previous`. Only what reuse needs
+    /// is read, so a caller that stored analyses as rows can rebuild the file from them; the
+    /// trace is not read at all (it may be from another compiler).
+    pub fn previous_analyses(bytes: &[u8]) -> Result<Vec<PreviousAnalysis>, ArtifactError> {
+        #[derive(Deserialize)]
+        struct Previous {
+            visits: Vec<PreviousVisit>,
+        }
+        #[derive(Deserialize)]
+        struct PreviousVisit {
+            analysis: Option<PreviousAnalysis>,
+        }
+        Header::read_json(bytes, Kind::Session)?;
+        let previous: Previous =
+            serde_json::from_slice(bytes).map_err(|e| ArtifactError::Json(Kind::Session, e))?;
+        Ok(previous
+            .visits
+            .into_iter()
+            .filter_map(|visit| visit.analysis)
+            .collect())
+    }
+}
+
+/// An earlier analysis as `run --previous` reads it: the question it answered and the result.
+#[derive(Clone, Debug, Deserialize)]
+pub struct PreviousAnalysis {
+    pub request_digest: String,
+    pub summary: SessionSummary,
+    pub check: Check,
+    #[serde(default)]
+    pub model: Option<ModelUsage>,
+    #[serde(default = "first_gate")]
+    pub gate_version: u32,
+    #[serde(default)]
+    pub answer: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VisitNarration {
     /// Index into the trace's `visits`.
     pub visit: usize,
+    /// How this run came by the narration.
+    #[serde(default)]
+    pub via: Via,
     #[serde(flatten)]
     pub narration: Narration,
+}
+
+/// Where a visit's narration came from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Via {
+    /// Asked of the model in this run (or only prepared, with `--prepare-only`).
+    #[default]
+    Narrated,
+    /// An earlier analysis of the identical request, accepted by this gate.
+    Reused,
+    /// An earlier answer to the identical request, judged again by this gate.
+    Regated,
+}
+
+/// Every version this build writes, for a consumer deciding what to recompute after an upgrade.
+#[derive(Clone, Debug, Serialize)]
+pub struct Versions {
+    /// The package version, for people; compare the fields below instead.
+    pub spoiler: &'static str,
+    /// Shape version per artifact kind.
+    pub schemas: IndexMap<Kind, u32>,
+    /// Changes when traces of the same recording and vocabulary change.
+    pub compiler: u32,
+    /// Changes when the rules accepting a model's answer change.
+    pub gate: u32,
+    /// The built-in narration prompt; any change to it changes every request digest.
+    pub prompt: PromptId,
+}
+
+impl Versions {
+    pub fn current() -> Self {
+        let kinds = [
+            Kind::Recording,
+            Kind::RecordingPage,
+            Kind::Trace,
+            Kind::AnalysisRequest,
+            Kind::Analysis,
+            Kind::Session,
+            Kind::VocabularySnapshot,
+            Kind::VocabularyCheck,
+        ];
+        Self {
+            spoiler: env!("CARGO_PKG_VERSION"),
+            schemas: kinds
+                .into_iter()
+                .map(|kind| (kind, kind.schema_version()))
+                .collect(),
+            compiler: COMPILER_VERSION,
+            gate: GATE_VERSION,
+            prompt: Instructions::default().id(),
+        }
+    }
 }
 
 /// What `spoiler vocab check` reports about a vocabulary file.

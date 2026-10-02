@@ -24,6 +24,9 @@ pub use validate::validate;
 pub const MAX_BAD_REF_RATIO: f64 = 0.15;
 /// Model calls per analysis: the first answer plus one corrected retry.
 pub const MAX_ATTEMPTS: u32 = 2;
+/// The rules that accept or reject a model's answer ([`assess`]): bump it when they change, so
+/// a stored answer is judged again (`run --previous`) instead of trusted.
+pub const GATE_VERSION: u32 = 1;
 
 /// A field that must be present but may be `null` (serde otherwise treats absence as `None`).
 fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {

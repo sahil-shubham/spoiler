@@ -249,7 +249,7 @@ Definitions, each stated once:
 
 **Where it is computed.** `Compiler::handle` (`crates/core/src/trace/compiler/mod.rs:232-297`) returns early for `Reading::Uninterpreted` (`:257`) — which is where mouse moves, scrolls and drags land. A `TimelineBuilder` on `Compiler` sees every event before that dispatch: it updates presence from the incremental source name the reading already carries, fidelity from `FullSnapshot` and the lifecycle tags (part 2), focus from input and visibility, and the per-tab first/last times. `quiet` subtracts gesture windows at `close_gesture` and requests as the network plugin records them. One pass, no second walk over the recording.
 
-**Artifact.** `TraceArtifact` gains `timeline: Timeline`; `Kind::Trace` schema 3 → 4 (`crates/core/src/artifact.rs:73-83`). The TSV is unchanged. Consumers read `actions` and `timeline` as JSON; the TSV stays the narrator's.
+**Artifact.** `TraceArtifact` gains `timeline: Option<Timeline>` (absent on traces compiled before it); additive, so `Kind::Trace` stays schema 3 (`docs/PLAN-versioning.md`). The TSV is unchanged. Consumers read `actions` and `timeline` as JSON; the TSV stays the narrator's.
 
 ### 2. PostHog lifecycle events
 
@@ -312,7 +312,7 @@ pub struct Prefix {
 
 **Where A comes from.** The old recording names the new one; the new one names nothing (finding 4). An archive that keeps every recording finds A as the recording that names B in its tail — SPC archives every discovered production recording (`spc: omni/replays/pipeline.py:124-131`), so the repair costs no PostHog request there. `spoiler compile --recording B --previous A` takes it as a file. Without an archive, `recordings fetch --session B --previous` finds A by one listing query (same `distinct_id`, ending within seconds of B's start) and fetches only A's last blob range: 2 requests against `--max-requests` (default 50, `README.md:281`). A blind start with no foreign tail anywhere (a reset, an expired A) stays `Blind`.
 
-`RecordingArtifact` gains `prefix: Option<Prefix>` and `foreign_tail: Option<…>`; `Kind::Recording` schema 1 → 2.
+`RecordingArtifact` gains `prefix: Option<Prefix>` and `foreign_tail: Option<…>`; additive, so `Kind::Recording` stays schema 1.
 
 ---
 
@@ -322,8 +322,8 @@ Two compiler-visible changes, kept apart because one is free for every stored tr
 
 | change | `COMPILER_VERSION` | schema | goldens | consumer cost |
 |---|---|---|---|---|
-| `Timeline` emitted; lifecycle tags read into it; `Capture` | 6 (unchanged) | Trace 3 → 4 | every `corpus/*.expected.tsv` byte-identical; `.expected.json` gains `timeline` | recompile archived recordings; no model call; refs and narrations stay valid |
-| idle rows and `active_s` from `Timeline`; the `blind` flag; programmatic inputs as click effects; foreign tails moved | 6 → 7 | Recording 1 → 2 | `.expected.tsv` change where presence, fidelity, inputs or tails differ | recompile; re-narrate only visits whose `request_digest` changed (`docs/PLAN-versioning.md`) |
+| `Timeline` emitted; lifecycle tags read into it; `Capture` | 6 (unchanged) | additive (`timeline`) | every `corpus/*.expected.tsv` byte-identical; `.expected.json` gains `timeline` | recompile archived recordings; `run --previous` reuses every narration |
+| idle rows and `active_s` from `Timeline`; the `blind` flag; programmatic inputs as click effects; foreign tails moved | 6 → 7 | additive (`prefix`, `foreign_tail`) | `.expected.tsv` change where presence, fidelity, inputs or tails differ | recompile; `run --previous` re-asks only visits whose `request_digest` changed |
 
 The first row's invariant is testable: the corpus harness compares TSVs (`crates/core/tests/corpus.rs:52-75`), so a timeline change that moves a single action fails it.
 
