@@ -1,0 +1,105 @@
+{
+ "description": "The tab's first incremental event and its first full snapshot share a millisecond: it was blind for no time, so its whole span is exact.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 500,
+   "data": {
+    "source": 1,
+    "positions": [
+     {
+      "x": 10,
+      "y": 10,
+      "id": 12,
+      "timeOffset": 0
+     }
+    ]
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 500,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  }
+ ]
+}

@@ -1,0 +1,58 @@
+{
+  "coverage": {
+    "events": 5,
+    "duplicates": 0,
+    "uninterpreted": {},
+    "malformed": {},
+    "opaque_mounts": {}
+  },
+  "visits": [
+    {
+      "first_ref": "e1",
+      "last_ref": "e2",
+      "start_ms": 0.0,
+      "end_ms": 1050.0,
+      "start": 0,
+      "end": 2
+    }
+  ],
+  "timeline": {
+    "t0": 0.0,
+    "end_ms": 301050.0,
+    "tabs": [
+      {
+        "win": 1,
+        "window_id": "w1",
+        "first_ms": 0.0,
+        "last_ms": 301050.0,
+        "pages": [
+          {
+            "at_ms": 0.0,
+            "path": "/page"
+          }
+        ],
+        "fidelity": [
+          {
+            "fidelity": "exact",
+            "start_ms": 0.0,
+            "end_ms": 301050.0
+          }
+        ]
+      }
+    ],
+    "presence": [
+      {
+        "start_ms": 1000.0,
+        "end_ms": 1050.0
+      }
+    ],
+    "focus": [
+      {
+        "win": 1,
+        "start_ms": 0.0,
+        "end_ms": 301050.0
+      }
+    ],
+    "quiet": []
+  }
+}

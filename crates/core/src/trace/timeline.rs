@@ -437,10 +437,13 @@ impl TimelineBuilder {
                         span: span(track.first, track.last),
                     });
                 }
-                if let Some(since) = track.dropping_since.take() {
+                // Dropping that began after the tab's last event dropped nothing of the tab.
+                if let Some(since) = track.dropping_since.take()
+                    && track.last > since
+                {
                     track.flawed.push(FidelitySpan {
                         fidelity: Fidelity::Dropped,
-                        span: span(since, track.last.max(since)),
+                        span: span(since, track.last),
                     });
                 }
                 if let Some(since) = track.stale_since.take()
@@ -557,6 +560,8 @@ fn subtract(gap: Span, cut: &[Span]) -> Vec<Span> {
 
 /// The flawed spans in time order, with `Exact` filling what they leave of `whole`.
 fn fill_exact(mut flawed: Vec<FidelitySpan>, whole: Span) -> Vec<FidelitySpan> {
+    // An empty span flags nothing; kept, it would end an `Exact` gap without moving the cursor.
+    flawed.retain(|span| span.span.end_ms > span.span.start_ms);
     flawed.sort_by(|a, b| a.span.start_ms.0.total_cmp(&b.span.start_ms.0));
     let mut filled = Vec::new();
     let mut cursor = whole.start_ms;

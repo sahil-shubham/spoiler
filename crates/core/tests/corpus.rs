@@ -49,6 +49,26 @@ fn corpus_cases_match_their_goldens() {
             .to_owned();
         let recording = recording::decode(&raw).unwrap();
         let compiled = compile(&recording, &matcher, &app).unwrap();
+        let name = case.file_name().unwrap().to_string_lossy().into_owned();
+        // Goldens get blessed; the timeline's own promise must hold whatever they say: each
+        // tab's fidelity covers `[first_ms, last_ms]` in order, with no gaps or overlaps.
+        for tab in compiled.timeline.iter().flat_map(|timeline| &timeline.tabs) {
+            let spans = &tab.fidelity;
+            let covers = spans
+                .first()
+                .is_some_and(|s| s.span.start_ms == tab.first_ms)
+                && spans.last().is_some_and(|s| s.span.end_ms == tab.last_ms)
+                && spans
+                    .windows(2)
+                    .all(|pair| pair[0].span.end_ms == pair[1].span.start_ms)
+                && spans.iter().all(|s| s.span.end_ms >= s.span.start_ms);
+            if !covers {
+                failures.push(format!(
+                    "{name}: tab {} fidelity does not cover [{:?}, {:?}] in order: {spans:?}",
+                    tab.win, tab.first_ms, tab.last_ms
+                ));
+            }
+        }
         let tsv = to_tsv(&compiled.actions) + "\n";
         let report = serde_json::to_string_pretty(&json!({
             "coverage": compiled.coverage,

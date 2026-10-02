@@ -1,0 +1,102 @@
+{
+ "description": "posthog-js goes idle and the session ends before it wakes: its idle marker is backdated to the last activity but dropping only began later, past the tab's last event, so nothing inside the tab was dropped.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 301050,
+   "data": {
+    "tag": "sessionIdle",
+    "payload": {
+     "eventTimestamp": 400000,
+     "lastActivityTimestamp": 1050,
+     "threshold": 300000
+    }
+   },
+   "win": "w1"
+  }
+ ]
+}

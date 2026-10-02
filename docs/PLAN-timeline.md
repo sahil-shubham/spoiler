@@ -320,14 +320,15 @@ pub struct Prefix {
 
 ### Versioning
 
-Two compiler-visible changes, kept apart because one is free for every stored trace and one is not.
+Compiler-visible changes, kept apart because some are free for every stored trace and one is not.
 
 | change | `COMPILER_VERSION` | schema | goldens | consumer cost |
 |---|---|---|---|---|
 | `Timeline` emitted; lifecycle tags read into it; `Capture` | 6 (unchanged) | additive (`timeline`) | every `corpus/*.expected.tsv` byte-identical; `.expected.json` gains `timeline` | recompile archived recordings; `run --previous` reuses every narration |
-| idle rows and `active_s` from `Timeline`; the `blind` flag; programmatic inputs as click effects; foreign tails moved | 6 → 7 | additive (`prefix`, `foreign_tail`) | `.expected.tsv` change where presence, fidelity, inputs or tails differ | recompile; `run --previous` re-asks only visits whose `request_digest` changed |
+| each tab's `fidelity` covers exactly `[first_ms, last_ms]`: no `exact` tail past a tab that ends idle, no overlap after an empty flawed span | 6 → 7 | unchanged | existing goldens byte-identical; `recorder_idle_until_the_end` and `blind_for_no_time` added | recompile; `run --previous` reuses every narration (the request digest reads neither) |
+| idle rows and `active_s` from `Timeline`; the `blind` flag; programmatic inputs as click effects; foreign tails moved | 7 → 8 | additive (`prefix`, `foreign_tail`) | `.expected.tsv` change where presence, fidelity, inputs or tails differ | recompile; `run --previous` re-asks only visits whose `request_digest` changed |
 
-The first row's invariant is testable: the corpus harness compares TSVs (`crates/core/tests/corpus.rs:52-75`), so a timeline change that moves a single action fails it.
+The first row's invariant is testable: the corpus harness compares TSVs (`crates/core/tests/corpus.rs:72-97`), so a timeline change that moves a single action fails it. The second row's is checked on every case whatever its golden says (`crates/core/tests/corpus.rs:52-71`).
 
 ### Corpus
 

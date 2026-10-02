@@ -63,7 +63,7 @@ fn is_false(flag: &bool) -> bool {
 }
 
 /// Version of the compilation rules. Traces from other versions are not comparable.
-pub const COMPILER_VERSION: u32 = 6;
+pub const COMPILER_VERSION: u32 = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
