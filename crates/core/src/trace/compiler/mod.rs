@@ -12,7 +12,11 @@
 mod handlers;
 mod tab;
 
-use super::{Action, Coverage, signals::finalize};
+use super::{
+    Action, Coverage,
+    signals::finalize,
+    timeline::{LIFECYCLE_TAGS, Timeline, TimelineBuilder},
+};
 use crate::replay::serialized_extension;
 use crate::time::{Millis, Timestamp};
 use crate::{
@@ -27,11 +31,13 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 use tab::Tab;
 
-/// A compiled recording: its actions, and what of the recording they could not account for.
+/// A compiled recording: its actions, what of the recording they could not account for, and
+/// the session's timeline (`None` only for a recording without events).
 #[derive(Clone, Debug)]
 pub struct Compilation {
     pub actions: Vec<Action>,
     pub coverage: Coverage,
+    pub timeline: Option<Timeline>,
 }
 
 /// Distinct custom-event and plugin names reported before the rest are pooled: names are
@@ -56,6 +62,7 @@ pub fn compile(
         return Ok(Compilation {
             actions: Vec::new(),
             coverage,
+            timeline: None,
         });
     };
     let mut compiler = Compiler {
@@ -71,6 +78,7 @@ pub fn compile(
         folds: Vec::new(),
         coverage,
         hrefs: IndexMap::new(),
+        timeline: TimelineBuilder::new(first.timestamp),
     };
     // Only posthog-js's own location events can repair a missing Meta. Keep tab boundaries.
     for event in recording.events().filter(|event| event.kind == 5) {
@@ -114,13 +122,15 @@ pub fn compile(
         .opaque_mounts
         .contains_key("mobile_screenshot")
         && !compiler.tabs.values().any(|tab| tab.mobile_semantics_seen);
+    let actions = finalize(
+        compiler.actions,
+        &matcher.vocabulary().thresholds,
+        &compiler.folds,
+        &|text| matcher.is_error_text(text),
+    );
     Ok(Compilation {
-        actions: finalize(
-            compiler.actions,
-            &matcher.vocabulary().thresholds,
-            &compiler.folds,
-            &|text| matcher.is_error_text(text),
-        ),
+        timeline: Some(compiler.timeline.finish(&actions)),
+        actions,
         coverage: compiler.coverage,
     })
 }
@@ -226,6 +236,7 @@ struct Compiler<'a> {
     /// (earlier click, double-click) pairs to merge when finalizing.
     folds: Vec<(usize, usize)>,
     coverage: Coverage,
+    timeline: TimelineBuilder,
 }
 
 impl Compiler<'_> {
@@ -237,7 +248,9 @@ impl Compiler<'_> {
             folds,
             hrefs,
             coverage,
+            timeline,
         } = self;
+        timeline.observe(event.win, event.timestamp, &reading);
         // Tab numbers follow each tab's first event, whatever the event is.
         if !tabs.contains_key(event.win) {
             let number = tabs.len() + 1;
@@ -284,7 +297,9 @@ impl Compiler<'_> {
             Signal::Input(input) => on_input(context, tab, coverage, actions, input, at),
             Signal::Selection(ranges) => on_selection(context, tab, actions, &ranges, at),
             Signal::Custom { tag, payload } => {
-                if !on_custom(context, tab, actions, &tag, &payload, at) {
+                if !on_custom(context, tab, actions, &tag, &payload, at)
+                    && !LIFECYCLE_TAGS.contains(&tag.as_str())
+                {
                     coverage.uninterpreted(&format!("custom:{tag}"));
                 }
             }

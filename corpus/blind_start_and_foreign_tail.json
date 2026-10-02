@@ -1,0 +1,285 @@
+{
+ "description": "A tab that records clicks before its first full snapshot starts blind. A $session_id_change naming another session starts that session's tail: the $session_starting inside it names this recording, not its predecessor.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 3,
+   "timestamp": 0,
+   "data": {
+    "source": 0,
+    "texts": [
+     {
+      "id": 11,
+      "value": "Saved"
+     }
+    ],
+    "attributes": [],
+    "removes": [],
+    "adds": []
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 4,
+   "timestamp": 5000,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 5000,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 5000,
+   "data": {
+    "tag": "$session_options",
+    "payload": {
+     "activePlugins": [
+      "rrweb/console@1",
+      "rrweb/network@1"
+     ],
+     "sessionRecordingOptions": {
+      "maskAllInputs": true,
+      "maskInputOptions": {
+       "password": true
+      },
+      "blockClass": "ph-no-capture"
+     }
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 6000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 6050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 20000,
+   "data": {
+    "tag": "$session_ending",
+    "payload": {
+     "currentSessionId": "01this-session",
+     "nextSessionId": "01next-session",
+     "nextWindowId": "w-next"
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 20001,
+   "data": {
+    "tag": "$session_id_change",
+    "payload": {
+     "sessionId": "01next-session",
+     "windowId": "w-next"
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 4,
+   "timestamp": 20002,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 20003,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 20004,
+   "data": {
+    "tag": "$session_options",
+    "payload": {
+     "activePlugins": [],
+     "sessionRecordingOptions": {
+      "maskAllInputs": false
+     }
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 20005,
+   "data": {
+    "tag": "$session_starting",
+    "payload": {
+     "previousSessionId": "01this-session",
+     "nextSessionId": "01next-session"
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 21000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 21050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  }
+ ]
+}

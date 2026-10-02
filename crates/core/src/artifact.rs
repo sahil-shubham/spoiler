@@ -14,7 +14,7 @@ use crate::{
     analysis::{Check, GATE_VERSION, Instructions, SessionSummary},
     model::Message,
     recording::Recording,
-    trace::{Action, COMPILER_VERSION, Coverage, Visit},
+    trace::{Action, COMPILER_VERSION, Coverage, Timeline, Visit},
     vocab::{App, Vocabulary},
 };
 use indexmap::IndexMap;
@@ -224,6 +224,10 @@ pub struct TraceArtifact {
     /// The actions split where the user was away; analyze one with `--visit`.
     #[serde(default)]
     pub visits: Vec<Visit>,
+    /// When the user was there, which tab was in front, and how much of each tab the recording
+    /// can show. Absent on traces compiled before it existed, and for empty recordings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<Timeline>,
     /// The actions rendered for people and the narrator.
     pub tsv: String,
 }

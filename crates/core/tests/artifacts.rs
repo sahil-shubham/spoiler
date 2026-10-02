@@ -23,6 +23,7 @@ fn trace_document() -> Value {
         vocab_digest: "vocabulary".into(),
         coverage: Default::default(),
         visits: trace::visits(&actions, &Thresholds::default()),
+        timeline: None,
         tsv: trace::to_tsv(&actions),
         actions,
     })

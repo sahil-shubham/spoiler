@@ -22,5 +22,44 @@
       "start": 0,
       "end": 1
     }
-  ]
+  ],
+  "timeline": {
+    "t0": 0.0,
+    "end_ms": 700.0,
+    "tabs": [
+      {
+        "win": 1,
+        "window_id": "w1",
+        "first_ms": 0.0,
+        "last_ms": 700.0,
+        "pages": [
+          {
+            "at_ms": 0.0,
+            "path": "/page"
+          }
+        ],
+        "fidelity": [
+          {
+            "fidelity": "exact",
+            "start_ms": 0.0,
+            "end_ms": 700.0
+          }
+        ]
+      }
+    ],
+    "presence": [
+      {
+        "start_ms": 500.0,
+        "end_ms": 500.0
+      }
+    ],
+    "focus": [
+      {
+        "win": 1,
+        "start_ms": 0.0,
+        "end_ms": 700.0
+      }
+    ],
+    "quiet": []
+  }
 }

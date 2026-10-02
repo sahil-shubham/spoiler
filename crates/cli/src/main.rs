@@ -448,7 +448,11 @@ fn compile_recording(
 ) -> Result<TraceArtifact> {
     ensure_app(vocabulary, app)?;
     let matcher = Matcher::new(&vocabulary.vocabulary);
-    let trace::Compilation { actions, coverage } = trace::compile(recording, &matcher, app)?;
+    let trace::Compilation {
+        actions,
+        coverage,
+        timeline,
+    } = trace::compile(recording, &matcher, app)?;
     let tsv = trace::to_tsv(&actions);
     let visits = trace::visits(&actions, &vocabulary.vocabulary.thresholds);
     Ok(TraceArtifact {
@@ -460,6 +464,7 @@ fn compile_recording(
         actions,
         coverage,
         visits,
+        timeline,
         tsv,
     })
 }

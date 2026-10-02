@@ -1,0 +1,324 @@
+{
+ "description": "A wake or a URL-blocker resume followed at once by a full snapshot is exact after the dropped stretch; the browser's offline spell is its own span.",
+ "app": "demo",
+ "events": [
+  {
+   "type": 4,
+   "timestamp": 0,
+   "data": {
+    "href": "https://demo.test/page",
+    "width": 1280,
+    "height": 800
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 0,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 1050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 301050,
+   "data": {
+    "tag": "sessionIdle",
+    "payload": {
+     "eventTimestamp": 350000,
+     "lastActivityTimestamp": 1050,
+     "threshold": 300000
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 400000,
+   "data": {
+    "tag": "sessionNoLongerIdle",
+    "payload": {
+     "reason": "user activity",
+     "type": 3
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 400150,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 401000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 401050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 410000,
+   "data": {
+    "tag": "recording paused",
+    "payload": {
+     "reason": "url blocker"
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 420000,
+   "data": {
+    "tag": "recording resumed",
+    "payload": {
+     "reason": "url blocker"
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 2,
+   "timestamp": 420010,
+   "data": {
+    "node": {
+     "type": 0,
+     "id": 16,
+     "childNodes": [
+      {
+       "type": 2,
+       "id": 15,
+       "tagName": "html",
+       "attributes": {},
+       "childNodes": [
+        {
+         "type": 2,
+         "id": 14,
+         "tagName": "head",
+         "attributes": {},
+         "childNodes": []
+        },
+        {
+         "type": 2,
+         "id": 13,
+         "tagName": "body",
+         "attributes": {},
+         "childNodes": [
+          {
+           "type": 2,
+           "id": 12,
+           "tagName": "button",
+           "attributes": {},
+           "childNodes": [
+            {
+             "type": 3,
+             "id": 11,
+             "textContent": "Save"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 421000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 421050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 430000,
+   "data": {
+    "tag": "browser offline",
+    "payload": {}
+   },
+   "win": "w1"
+  },
+  {
+   "type": 5,
+   "timestamp": 445000,
+   "data": {
+    "tag": "browser online",
+    "payload": {}
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 446000,
+   "data": {
+    "source": 2,
+    "type": 1,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  },
+  {
+   "type": 3,
+   "timestamp": 446050,
+   "data": {
+    "source": 2,
+    "type": 2,
+    "id": 12,
+    "x": 100,
+    "y": 100
+   },
+   "win": "w1"
+  }
+ ]
+}

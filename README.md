@@ -56,6 +56,11 @@ recording ───────────────────────�
    Each click resolves to an element, a vocabulary feature, what changed, and how fast.
    Rules raise flags: `dead`, `unresponsive`, `rage`, `slow`, `error_after`, `error_shown`, `thrash`.
    The same recording, vocabulary and compiler version always give the same trace.
+   The trace also carries a `timeline`: when the user was there (posthog-js's own activity
+   rule), which tab was in front, the gaps nobody acted in, and per tab how much of the page the
+   recording could show (`exact`, `blind` before its first snapshot, `dropped` while the
+   recorder was idle or paused, `stale` until it caught up). Players and narration read it
+   instead of re-deriving it.
 3. **Narrate.** `analyze` sends the trace as TSV, plus the vocabulary it touched.
    The recording itself is never sent. `run` makes one call per visit.
    The model returns tasks with a goal, outcome, obstacle and friction, all citing refs.

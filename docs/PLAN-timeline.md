@@ -1,7 +1,7 @@
 # Timeline Plan
 
 Owner: Sahil · Scope: `crates/core` (recording, trace), `crates/cli` (PostHog fetch) · First consumer: the SPC Pulse replay player (outside this repo)
-Status: not started · Design source: SPC replay review notes; 12 Pulse + 10 Pando PostHog recordings (15–28 Sep 2026); posthog-js recorder source, 2026-10-01
+Status: part 1 and the timeline half of part 2 built (release A, `crates/core/src/trace/timeline.rs`); compiler rules and stitching (release B) not started · Design source: SPC replay review notes; 12 Pulse + 10 Pando PostHog recordings (15–28 Sep 2026); posthog-js recorder source, 2026-10-01
 Citations: paths are this repo unless prefixed `spc:` (the SPC monorepo). Recorder citations are the build SPC browsers load today — `https://eu-assets.i.posthog.com/static/posthog-recorder.js`, `LIB_VERSION 1.435.6`, read from its published sourcemap: `rec:N` is `lazy-loaded-session-recorder.ts`, `rrweb:N` is `rrweb-record.js`, `throttler:N` is `mutation-throttler.ts`, `net:N` is `network-plugin.ts`, `console:N` is `rrweb-plugin-console-record.js`, `utils:N` is `sessionrecording-utils.ts`. Session and window ids are managed by the main bundle, which the app ships from npm: `npm-sessionid:N` and `npm-recording:N` are `sessionid.ts` and `session-recording.ts` of posthog-js 1.393.0 (Pulse's pin), from its sourcemap.
 
 A trace says what the user did. It does not say *when the user was there*, *which tab was in front*, or *whether the page Spoiler reconstructed was the page the user saw*. Every consumer re-derives those, differently. This plan makes them a compiled, versioned part of the trace.
@@ -131,6 +131,8 @@ Three parts, all code; no model is involved anywhere in this plan.
 
 Computed by the compiler in the same event walk, written into the trace artifact, and the only source for idle, active time and presence everywhere.
 
+**As built.** The types below are the design; the code is the contract (`crates/core/src/trace/timeline.rs`). Where they differ: `Page` has no `hard_load` (no reader); `Capture` keeps `mask_all_inputs`, `plugins` and `recorder_options` (the option names, which fingerprint the recorder build) and reads only `$session_options`; `SessionLink` is `{ session_id, window_id, at_ms }`; `quiet` subtracts gesture reactions, not requests (decision 3). Lifecycle tags the timeline reads leave `coverage.uninterpreted`; `$recording_started`, `$posthog_config`, `$remote_config_received`, `triggerGroupSamplingDecisionMade`, `$json_ld` and `rrweb/fullscreen` still count there. Recorder warnings (throttled nodes) are release B.
+
 ```rust
 /// When the user was there, which tab was in front, and how much of each tab the recording
 /// can show. Times are spans from `t0`, like every action time.
@@ -242,7 +244,7 @@ Definitions, each stated once:
 |---|---|---|
 | presence | union over tabs of user-input events, sources = posthog-js `ACTIVE_SOURCES`, merged below `PRESENCE_GAP_MS = 1000` | the recorder's own definition; PostHog's active time already uses it |
 | focus | the tab of the latest user input or `window visible` at or before *t*, unless it went hidden since; none when all are hidden | input is the only evidence of where the user looked; two visible windows side by side resolve by input |
-| quiet | complement of presence, minus open gesture windows and in-flight requests | a spinner the user is watching is not skippable |
+| quiet | gaps between presence runs, minus each gesture's reaction (from its first to its last visible change) | a spinner the user is watching is not skippable; background polling would otherwise leave nothing quiet |
 | idle (narrator row) | a quiet span ≥ `idle_ms` on a visible tab | replaces the action-gap rule in `finalize` |
 | active time (task) | presence ∩ \[task start, task end\] | replaces the per-gap 30 s cap in `measure_task` |
 | fidelity | `Blind` before the tab's first FullSnapshot; `Dropped` from `sessionIdle.payload.eventTimestamp` (or `recording paused`) to the next recorded event; `Stale` from a `sessionNoLongerIdle` to the tab's next FullSnapshot, when one does not follow at once; `Exact` otherwise | what the recorder actually captured (§ The recorder) |
@@ -345,8 +347,8 @@ New cases, each a golden pair: `presence_reading_is_not_idle` (scrolling through
 ## Open decisions
 
 1. **`blind` as a flag or silence.** A flag tells the narrator the page is unknown and costs one prompt line; suppressing only `dead`/`unresponsive` is quieter but lets the narrator infer a dead click from "no effect".
-2. **`PRESENCE_GAP_MS`.** rrweb emits mouse moves in 500 ms batches and scrolls at most every 100 ms (`rrweb:3118-3119`, `rrweb:3240`), so 1 s merges continuous movement into one run and splits at the first missed batch; it sets the size of `presence` and the resolution of `quiet`.
-3. **Requests in `quiet`.** A request in flight on a hidden tab blocks nothing the user sees; counting only the focused tab's requests is stricter, and needs focus before quiet in the builder.
+2. ~~**`PRESENCE_GAP_MS`.**~~ Decided: 1 s. rrweb emits mouse moves in 500 ms batches and scrolls at most every 100 ms (`rrweb:3118-3119`, `rrweb:3240`), so 1 s merges continuous movement into one run and splits at the first missed batch.
+3. ~~**Requests in `quiet`.**~~ Decided: none. A request the user triggered is inside its gesture's reaction already; counting every request lets background polling (Pulse has it) erase every quiet span.
 4. **Where the tail repair runs.** In decode, so every consumer of a recording artifact (compiler, player) sees repaired streams; or only in compile, leaving archived recordings byte-for-byte as PostHog stored them. A player needs the repaired stream either way.
-5. **Timeline inside the trace.** Inside, `quiet` can use gesture windows and the vocabulary's thresholds; a separate `timeline` artifact would be vocabulary-free and leave the trace digest alone, at the cost of a second walk.
+5. ~~**Timeline inside the trace.**~~ Decided: inside, as `trace.timeline` — one walk, and quiet uses gesture reactions. It does not move the trace's actions or TSV, and `run --previous` reuses every narration across the recompile.
 6. **The `Stale` window after a wake.** 33 of 41 wakes were followed within 0.2 s by a FullSnapshot. "Within 1 s" treats the rest as stale; a wake whose recorder dropped nothing while idle is not stale at all, and the stream cannot tell those apart.

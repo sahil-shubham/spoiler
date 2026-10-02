@@ -1,0 +1,5 @@
+ref	t_s	win	kind	surface	target	feature	react	effect	flags
+e1	1.1	w1	click		UNRESOLVED node#12			none	
+e2	5.0	w1	nav	demo.page	/page				
+e3	6.0	w1	click	demo.page	button "Save"			none	unresponsive
+e4	21.1	w1	click	demo.page	button "Save"			none	unresponsive

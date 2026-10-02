@@ -53,6 +53,7 @@ fn corpus_cases_match_their_goldens() {
         let report = serde_json::to_string_pretty(&json!({
             "coverage": compiled.coverage,
             "visits": visits(&compiled.actions, &vocabulary.thresholds),
+            "timeline": compiled.timeline,
         }))
         .unwrap()
             + "\n";

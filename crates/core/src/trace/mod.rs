@@ -6,6 +6,7 @@ mod effect;
 mod render;
 mod signals;
 mod target;
+mod timeline;
 mod visits;
 mod window;
 
@@ -20,6 +21,10 @@ use std::{borrow::Cow, collections::BTreeMap, fmt, str::FromStr};
 pub use compiler::{Compilation, compile};
 pub use effect::{Change, Effect, OverlayOp, Presence, TextOp};
 pub use render::{effect_cell, render_effect, render_effects, to_tsv};
+pub use timeline::{
+    Capture, Fidelity, FidelitySpan, FocusSpan, PRESENCE_GAP_MS, Page, SessionLink, Span,
+    TabTimeline, Timeline,
+};
 pub use visits::{Visit, visits};
 
 /// What of a recording the trace could not account for. A trace is only as complete as this
