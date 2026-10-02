@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/core", "crates/cli"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.96"
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ authors = ["Sahil Shubham"]
 
 [workspace.dependencies]
 # Exact: the crates are released in lockstep, and cargo rejects a pin that disagrees with the path.
-spoiler-core = { path = "crates/core", version = "=0.1.2" }
+spoiler-core = { path = "crates/core", version = "=0.1.3" }
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
