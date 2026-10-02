@@ -1,7 +1,7 @@
 # Vocabulary Plan
 
 Owner: Sahil · Scope: `crates/core/src/vocab`, `crates/cli` (`vocab build`, `vocab check`, a new `vocab extract`), `crates/core/src/analysis/prompt.rs` · First consumer: SPC (`spc: omni/replays/vocab/{pulse,pando}.yaml`)
-Status: not started · Design source: SPC's two pinned vocabularies, their source tree, and 20 PostHog recordings compiled against them, 2026-10-01
+Status: § 1 (`vocab extract`) and § 4 (`vocab check --extract`) built for React Router flat routes (release 0.1.2); drafting from the extract (§ 2), extract-backed matching (§ 3) and the field cleanup not started · Design source: SPC's two pinned vocabularies, their source tree, and 20 PostHog recordings compiled against them, 2026-10-01
 Citations: paths are this repo unless prefixed `spc:`.
 
 The vocabulary is the only place Spoiler learns what a product *is*: its pages, its controls, its words. Today a model writes it from a lossy digest, half of it is never read, and on SPC it names almost nothing. Its readers today are the compiler and the narrator; its value is wider than both (§ Applications).
@@ -233,6 +233,8 @@ Maximum coverage makes the extract large and machine-shaped; a reviewer should n
 - **Lookup is a hash, not a scan.** `Matcher` today tries tiers × candidates per target (`crates/core/src/vocab/matcher.rs:226-242`). With the extract it builds one `HashMap<(surface, kind, value), feature>` at load and resolves a target in one probe per tier; drafted features override extract ids in that map.
 - **The snapshot pins both.** `VocabularySnapshot.provenance` gains the extract's digest, so a trace names exactly which extract and which overlay produced its feature ids.
 
+**As built (0.1.2).** `spoiler vocab extract` writes one JSON artifact (`kind: vocabulary_extract`) whose `files`, `routes`, `literals` and `events` arrays hold one record per line, not a separate `.jsonl`: every command still writes one JSON artifact. Measured on SPC: Pulse 931 files, 312 routes (134 pages), 8,983 literals in 0.8 s; Pando 436 files, 94 routes (50 pages) in 0.2 s. Beyond JSX attributes and text, literals come from conditional and `&&`/`||` branches (`{busy ? "Saving" : "Save"}`), fragments, label-named object keys, variables and default values (`searchPlaceholder = "…"`), recorded as `prop`: the first SPC run without them reported six matchers as missing that the source does write. Pages exclude pathless layouts and layouts whose `_index` child is the page. Against SPC's pinned vocabularies the check finds, all real: 41 Pulse pages with no surface, 2 surfaces and 3 citations to removed routes, 1 Pando matcher of the wrong kind (`placeholder` for a command item's text), and 23 declared events that are backend events no frontend sends. The extract is not yet read by `vocab build` or the matcher (§ 2, § 3).
+
 ### What does NOT get built
 
 - **No bundler loader or build plugin.** Extraction reads source files; it does not hook a build. A loader is needed only to stamp identifiers into rendered DOM, which extracted literals make unnecessary for every control that already has one.
@@ -261,7 +263,7 @@ SPC's pages carry meaning in the query string (`?session=`, `?status=`, `?tab=`)
 
 ## Open decisions
 
-1. **MSRV.** The toolchain is 1.96 (`rust-toolchain.toml`) and `oxc_parser` 0.152 needs 1.96, but `Cargo.toml` still declares `rust-version = "1.88"`, which `cargo install` users see. Raising it to 1.96 settles this; a separate extractor crate is the alternative.
+1. ~~**MSRV.**~~ Decided: `rust-version` is 1.96, the extractor lives in the CLI crate, and `spoiler-core` (types and checks) takes no oxc dependency.
 2. **Literal features by default.** Naming every extracted literal maximizes coverage and makes feature ids long; naming only drafted features keeps ids curated and coverage where it is.
 3. **Vocabulary v2 now or wire-only first.** With `N-1` readers (`docs/PLAN-versioning.md`) a v1 file keeps loading after v2 ships, so deletion no longer forces every consumer to move at once; the remaining choice is whether wiring and deletion ship in one release.
-4. **Where the extract lives.** Committed in the app repo next to the vocabulary (reviewable diffs, CI compares), or generated in CI only (no churn, no history).
+4. **Where the extract lives.** Committed in the app repo next to the vocabulary (reviewable diffs, CI compares), or generated in CI only (no churn, no history). The artifact is one record per line either way, and on SPC's Pulse it is 7,000 lines for 931 files.

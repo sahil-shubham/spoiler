@@ -42,9 +42,9 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: 1.88.0
+      RUSTUP_TOOLCHAIN: 1.96.0
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.96.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo +1.88.0 check --workspace --all-targets --locked
+      - run: cargo +1.96.0 check --workspace --all-targets --locked

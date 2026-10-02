@@ -135,6 +135,33 @@ pub fn digest(value: &impl Serialize) -> Result<String> {
     write_json(value, std::io::sink())
 }
 
+/// [`publish`] for an artifact already rendered as text (one record per line).
+pub fn publish_text(text: &str, path: Option<&Path>) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(std::io::stdout().lock().write_all(text.as_bytes())?);
+    };
+    let directory = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    ensure!(
+        directory.is_dir(),
+        "output directory does not exist: {}",
+        directory.display()
+    );
+    let temporary = temporary_path(directory)?;
+    let written = std::fs::write(&temporary, text)
+        .with_context(|| format!("creating {}", temporary.display()))
+        .and_then(|()| {
+            std::fs::rename(&temporary, path)
+                .with_context(|| format!("publishing {}", path.display()))
+        });
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    written
+}
+
 fn temporary_path(directory: &Path) -> Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     Ok(directory.join(format!(".spoiler-{}-{nanos}.tmp", std::process::id())))

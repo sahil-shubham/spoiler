@@ -36,6 +36,68 @@ fn button(text: &str) -> TargetDesc {
 }
 
 #[test]
+fn an_extract_check_reports_only_what_the_source_does_not_say() {
+    use spoiler_core::vocab::extract::{Rule, VocabularyExtract, check};
+    let vocabulary = Vocabulary::from_document(json!({
+        "version": 1,
+        "apps": {
+            "demo": { "project": 1, "host": "example.test", "audience": "users" },
+            "other": { "project": 2, "host": "other.test", "audience": "users" },
+        },
+        "surfaces": [
+            { "id": "demo.item", "app": "demo", "route": "/item/:id", "name": "Item", "source": "app/routes/item.$id.jsx:3" },
+            { "id": "demo.gone", "app": "demo", "route": "/gone", "name": "Gone", "source": "app/routes/gone.jsx" },
+            { "id": "other.home", "app": "other", "route": "/elsewhere", "name": "Other app" },
+        ],
+        "excluded_surfaces": [{ "app": "demo", "route": "/admin", "reason": "staff only" }],
+        "features": [
+            { "id": "chrome", "surface": "*", "app": "demo", "name": "Menu", "matchers": { "aria": ["Account menu"] } },
+            { "id": "open", "surface": "demo.item", "name": "Open", "matchers": { "aria_template": ["Open {document}"] } },
+            { "id": "renamed", "surface": "demo.item", "name": "Save", "matchers": { "text": ["Save"], "testid": ["save"] } },
+            { "id": "elsewhere", "surface": "other.home", "name": "Not ours", "matchers": { "text": ["Nowhere"] } },
+        ],
+        "events": [{ "name": "item.saved", "app": "demo" }, { "name": "item.opened", "app": "demo" }],
+    }))
+    .unwrap();
+    let extract: VocabularyExtract = serde_json::from_value(json!({
+        "schema_version": 1, "kind": "vocabulary_extract", "app": "demo",
+        "routes_from": "react-router-flat-routes",
+        "files": [{ "name": "app/routes/item.$id.jsx", "sha256": "x" }],
+        "routes": [
+            { "route": "/item/:id", "params": ["id"], "file": "app/routes/item.$id.jsx", "renders": true, "page": true },
+            { "route": "/admin", "file": "app/routes/admin.jsx", "renders": true, "page": true },
+            { "route": "/new", "file": "app/routes/new.jsx", "renders": true, "page": true },
+            { "route": "/", "file": "app/routes/_app.jsx", "renders": true, "page": false },
+            { "route": "/api/ping", "file": "app/routes/api.ping.ts", "renders": false, "page": false },
+        ],
+        "literals": [
+            { "id": "1", "kind": "aria", "value": "Account menu", "at": "app/root.jsx:9", "routes": ["/item/:id"] },
+            { "id": "2", "kind": "aria", "value": "Open {name}", "template": true, "at": "app/routes/item.$id.jsx:5", "routes": ["/item/:id"] },
+            { "id": "3", "kind": "prop", "value": "save", "at": "app/routes/item.$id.jsx:6", "routes": ["/item/:id"] },
+        ],
+        "events": [{ "at": "app/routes/item.$id.jsx:7", "call": "capture", "name": "item.opened" }],
+    }))
+    .unwrap();
+    let found: Vec<(Rule, String)> = check(&vocabulary, &extract)
+        .into_iter()
+        .map(|finding| (finding.rule, finding.subject))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            // An excluded route, a layout and a resource route need no surface.
+            (Rule::RouteWithoutSurface, "/new".into()),
+            (Rule::SurfaceWithoutRoute, "demo.gone".into()),
+            // A template matches whatever its placeholders are named; a prop can supply a testid.
+            (Rule::MatcherNotInSource, "renamed".into()),
+            // `file:line` is the file; another app's surfaces and features are not checked.
+            (Rule::CitationNotInSource, "demo.gone".into()),
+            (Rule::EventNotInSource, "item.saved".into()),
+        ]
+    );
+}
+
+#[test]
 fn routes_and_features_respect_specificity_and_scope() {
     let vocabulary = vocabulary();
     let matcher = Matcher::new(&vocabulary);

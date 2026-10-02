@@ -5,6 +5,7 @@
 //! consumers; nothing here infers it at runtime. [`Matcher`] compiles one for lookups.
 
 pub mod build;
+pub mod extract;
 mod matcher;
 
 use crate::{

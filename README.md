@@ -209,7 +209,8 @@ spoiler run \
 | `compile` | recording + vocabulary → `trace` | none |
 | `analyze` | trace → `analysis_request` or `analysis` | OpenRouter with `--model` |
 | `vocab build` | product config + sources → `vocabulary_snapshot` | OpenRouter, unless `--candidate` |
-| `vocab check` | vocabulary → `vocabulary_check` | none |
+| `vocab check` | vocabulary (+ `--extract`) → `vocabulary_check` | none |
+| `vocab extract` | app source → `vocabulary_extract` (routes, visible literals, tracked events) | none |
 | `decode` | recording file → normalized `recording` | none |
 | `recordings list`, `fetch` | PostHog project → `recording_page`, `recording` | PostHog |
 | `versions` | → the artifact shapes, compiler, gate and prompt this build writes | none |
@@ -268,6 +269,14 @@ gaps: ["Billing page: billing.tsx is not among the sources, so seat purchases ar
 - Optional: `statuses`, `grid` (row identity), `telemetry` (URLs to ignore), `error_text`, `thresholds`.
 - Defaults: English error patterns, common monitoring requests ignored, `slow_ms: 1000`.
 - `vocab check` reports invalid matchers and inert entries.
+- `vocab extract --app web --routes app/routes` reads a React Router flat-routes app with a
+  parser: every route (and whether it is a page), every literal a person sees or a matcher keys
+  on (`aria-label`, `placeholder`, `title`, `data-testid`, link targets, text, label props),
+  with `file:line` and the routes that render it, through imports, tsconfig paths and
+  workspace packages. The file has one record per line, so it diffs well when committed.
+- `vocab check --extract extract.json [--strict]` reports pages without a surface, surfaces
+  without a route, matcher values no source writes, citations to files no route imports, and
+  declared events no source sends. `--strict` exits 1 when there are any: a CI gate.
 
 ### Recordings
 

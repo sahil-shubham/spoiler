@@ -69,6 +69,7 @@ pub enum Kind {
     Analysis,
     VocabularySnapshot,
     VocabularyCheck,
+    VocabularyExtract,
     RecordingPage,
     Session,
 }
@@ -83,7 +84,11 @@ impl Kind {
             Self::Trace => 3,
             // 2: `next_cursor` is an opaque token (formerly a JSON object).
             Self::RecordingPage => 2,
-            Self::Recording | Self::VocabularySnapshot | Self::VocabularyCheck | Self::Session => 1,
+            Self::Recording
+            | Self::VocabularySnapshot
+            | Self::VocabularyCheck
+            | Self::VocabularyExtract
+            | Self::Session => 1,
         }
     }
 }
@@ -426,6 +431,7 @@ impl Versions {
             Kind::Session,
             Kind::VocabularySnapshot,
             Kind::VocabularyCheck,
+            Kind::VocabularyExtract,
         ];
         Self {
             spoiler: env!("CARGO_PKG_VERSION"),
@@ -452,6 +458,17 @@ pub struct VocabularyCheck {
     pub features: usize,
     /// Parts of the vocabulary that can never match.
     pub warnings: Vec<String>,
+    /// With `--extract`: what the vocabulary claims that the app's source does not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extract: Option<ExtractCheck>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ExtractCheck {
+    pub app: String,
+    /// SHA-256 of the extract file checked against.
+    pub sha256: String,
+    pub findings: Vec<crate::vocab::extract::Finding>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

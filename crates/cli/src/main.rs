@@ -8,6 +8,7 @@
 //! Configuration is flags only; credentials are read from the environment only, so they never
 //! appear in process listings or shell history.
 
+mod extract;
 mod http;
 mod io;
 mod openrouter;
@@ -17,21 +18,21 @@ mod vocab_build;
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use io::{
-    PinnedVocabulary, digest, load_vocabulary, publish, publish_digest, read, read_recording,
-    read_text,
+    PinnedVocabulary, digest, load_vocabulary, publish, publish_digest, publish_text, read,
+    read_recording, read_text,
 };
 use serde_json::json;
 use spoiler_core::{
     analysis::{self, Assessment, Check, GATE_VERSION, Instructions, SessionSummary},
     artifact::{
-        AnalysisArtifact, AnalysisProvenance, AnalysisRequest, Header, Kind, ModelUsage, Narration,
-        PreviousAnalysis, RecordingArtifact, RecordingSource, SessionArtifact, TraceArtifact,
-        Versions, Via, VisitNarration, VocabularyCheck, sha256_hex,
+        AnalysisArtifact, AnalysisProvenance, AnalysisRequest, ExtractCheck, Header, Kind,
+        ModelUsage, Narration, PreviousAnalysis, RecordingArtifact, RecordingSource,
+        SessionArtifact, TraceArtifact, Versions, Via, VisitNarration, VocabularyCheck, sha256_hex,
     },
     model::Message,
     recording::{self, Limits, Recording},
     trace::{self, COMPILER_VERSION},
-    vocab::Matcher,
+    vocab::{Matcher, extract::VocabularyExtract},
 };
 use std::{
     path::{Path, PathBuf},
@@ -274,10 +275,32 @@ enum VocabCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Validate a vocabulary and report what it contains and what is inert.
+    /// Validate a vocabulary and report what it contains and what is inert. With --extract,
+    /// also what it claims that the app's source (as `vocab extract` read it) does not say.
     Check {
         #[command(flatten)]
         vocab: Vocab,
+        /// A `vocab extract` artifact for one app of the vocabulary.
+        #[arg(long)]
+        extract: Option<PathBuf>,
+        /// Exit 1 when the extract check finds anything (after writing the report).
+        #[arg(long, requires = "extract")]
+        strict: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Read an app's routes, visible literals and tracked events from its source with a
+    /// parser: what `vocab check --extract` holds a vocabulary to. No model, no network.
+    Extract {
+        /// The vocabulary app these sources are.
+        #[arg(long)]
+        app: String,
+        /// Paths in the extract are relative to this (the repository root).
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// The React Router flat-routes directory, relative to --root.
+        #[arg(long)]
+        routes: PathBuf,
         #[command(flatten)]
         output: Output,
     },
@@ -809,8 +832,33 @@ fn run_session(args: RunArgs, limits: Limits) -> Result<()> {
 
 fn vocab(command: VocabCommand) -> Result<()> {
     match command {
-        VocabCommand::Check { vocab, output } => {
+        VocabCommand::Check {
+            vocab,
+            extract,
+            strict,
+            output,
+        } => {
             let PinnedVocabulary { vocabulary, digest } = load_vocabulary(&vocab.vocab)?;
+            let extract = match &extract {
+                Some(path) => {
+                    let bytes = read(path)?;
+                    let parsed: VocabularyExtract = serde_json::from_slice(&bytes)
+                        .with_context(|| format!("loading extract {}", path.display()))?;
+                    parsed.header.check(Kind::VocabularyExtract)?;
+                    ensure!(
+                        vocabulary.apps.contains_key(&parsed.app),
+                        "the vocabulary has no app {}",
+                        parsed.app
+                    );
+                    Some(ExtractCheck {
+                        findings: spoiler_core::vocab::extract::check(&vocabulary, &parsed),
+                        app: parsed.app,
+                        sha256: sha256_hex(&bytes),
+                    })
+                }
+                None => None,
+            };
+            let found = extract.as_ref().map_or(0, |check| check.findings.len());
             let report = VocabularyCheck {
                 header: Header::new(Kind::VocabularyCheck),
                 sha256: digest,
@@ -818,8 +866,27 @@ fn vocab(command: VocabCommand) -> Result<()> {
                 surfaces: vocabulary.surfaces.len(),
                 features: vocabulary.features.len(),
                 apps: vocabulary.apps,
+                extract,
             };
-            publish(&report, output.out.as_deref())
+            publish(&report, output.out.as_deref())?;
+            ensure!(
+                !strict || found == 0,
+                "the vocabulary disagrees with its source in {found} place(s); see the report"
+            );
+            Ok(())
+        }
+        VocabCommand::Extract {
+            app,
+            root,
+            routes,
+            output,
+        } => {
+            let extracted = extract::extract(&extract::Request {
+                app: &app,
+                root: &root,
+                routes: &routes,
+            })?;
+            publish_text(&extracted.to_json_lines(), output.out.as_deref())
         }
         VocabCommand::Build {
             config,
